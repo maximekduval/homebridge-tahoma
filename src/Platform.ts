@@ -94,7 +94,8 @@ export class Platform implements DynamicPlatformPlugin {
         this.exclude.push('Pod', 'ConfigurationComponent', 'NetworkComponent', 'ProtocolGateway', 'ConsumptionSensor',
             'OnOffHeatingSystem', 'Wifi', 'RemoteController',
             // AtlanticElectricalTowelDryer bad sensors
-            'io:LightIOSystemDeviceSensor', 'io:RelativeHumidityIOSystemDeviceSensor', 'WeatherForecastSensor',
+            'io:LightIOSystemDeviceSensor', 'io:RelativeHumidityIOSystemDeviceSensor', 'enocean:EnOceanHumidityComfortSensor',
+            'WeatherForecastSensor',
         );
         this.exposeScenarios = config.exposeScenarios;
         config.devicesConfig?.forEach(x => this.devicesConfig[x.key] = x);
