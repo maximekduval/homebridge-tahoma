@@ -7,7 +7,9 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     protected MIN_TEMP = 16;
     protected MAX_TEMP = 30;
     protected TARGET_MODES = [
-        Characteristics.TargetHeatingCoolingState.AUTO,
+        // Placeholder — overridden dynamically in computeStates() once the
+        // operating mode (Heating / Cooling) is known.
+        Characteristics.TargetHeatingCoolingState.HEAT,
         Characteristics.TargetHeatingCoolingState.OFF,
     ];
 
@@ -22,6 +24,8 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         const commands: Array<Command> = [];
         switch (value) {
             case Characteristics.TargetHeatingCoolingState.AUTO:
+            case Characteristics.TargetHeatingCoolingState.HEAT:
+            case Characteristics.TargetHeatingCoolingState.COOL:
                 commands.push(new Command('set' + heatingCooling + 'OnOffState', 'on'));
                 commands.push(new Command('setPassAPC' + heatingCooling + 'Mode', this.prog?.value ? 'internalScheduling' : 'manu'));
                 break;
@@ -107,6 +111,16 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         let targetTemperature;
         const heatingCooling = this.getHeatingCooling();
 
+        // Use HEAT/COOL instead of AUTO so HomeKit shows a meaningful label
+        // ("Chauffer"/"Refroidir" vs "Automatique") and enables single-tap toggle.
+        const activeMode = heatingCooling === 'Cooling'
+            ? Characteristics.TargetHeatingCoolingState.COOL
+            : Characteristics.TargetHeatingCoolingState.HEAT;
+
+        // Keep valid modes in sync with the current operating mode so that the
+        // characteristic always shows exactly two choices: active or off.
+        this.targetState?.setProps({ validValues: [activeMode, Characteristics.TargetHeatingCoolingState.OFF] });
+
         if (this.device.get(`core:${heatingCooling}OnOffState`) === 'off') {
             targetState = Characteristics.TargetHeatingCoolingState.OFF;
             this.currentState?.updateValue(Characteristics.CurrentHeatingCoolingState.OFF);
@@ -127,7 +141,7 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
                     this.currentState?.updateValue(Characteristics.CurrentHeatingCoolingState.COOL);
                 }
             }
-            targetState = Characteristics.TargetHeatingCoolingState.AUTO;
+            targetState = activeMode;
         }
 
         if (this.device.get(`io:PassAPC${heatingCooling}ModeState`) === 'internalScheduling') {
