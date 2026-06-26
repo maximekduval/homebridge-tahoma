@@ -114,6 +114,10 @@ export class FakeDevice extends EventEmitter {
         return this.stateMap[name];
     }
 
+    getNumber(name: string) {
+        return Number(this.stateMap[name]);
+    }
+
     set(name: string, value: unknown) {
         this.stateMap[name] = value;
     }

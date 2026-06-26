@@ -108,9 +108,9 @@ export default class HeatingSystem extends Mapper {
     }
 
     protected async setTargetState(value) {
-        if (value === this.targetState?.value) {
-            return;
-        }
+        // Note: we intentionally do not short-circuit when value equals the
+        // current target state — that prevented re-issuing a command to re-sync
+        // a device whose real state had drifted from HomeKit's.
         const action = await this.executeCommands(this.getTargetStateCommands(value));
         action.on('update', (state) => {
             switch (state) {

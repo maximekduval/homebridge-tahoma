@@ -44,4 +44,23 @@ module.exports = [
             '@typescript-eslint/no-unused-vars': ['error', { args: 'none', ignoreRestSiblings: true }],
         },
     },
+    {
+        files: ['test/**/*.ts'],
+        languageOptions: {
+            parser: tsParser,
+            ecmaVersion: 2020,
+            sourceType: 'module',
+        },
+        plugins: {
+            '@typescript-eslint': tsPlugin,
+        },
+        rules: {
+            'quotes': ['warn', 'single'],
+            'semi': ['warn', 'always'],
+            'comma-dangle': ['warn', 'always-multiline'],
+            '@typescript-eslint/no-explicit-any': 'off',
+            'no-unused-vars': 'off',
+            '@typescript-eslint/no-unused-vars': ['error', { args: 'none' }],
+        },
+    },
 ];

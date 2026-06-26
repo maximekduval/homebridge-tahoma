@@ -77,11 +77,21 @@ Décisions actées :
   des erreurs du debounce (session précédente) sont jugés suffisants ; pas de
   churn ajouté.
 
-### Phase 2 — Thermostats Atlantic/Cozytouch
-7. C3 : déterminer le mode depuis les états du device (parent en fallback).
-8. O1/O4 : remonter `lastConfirmedTemperature`/`onGet`/`MIN_TEMP` dans la base.
-9. O2/O3 : retirer court-circuit ; comparaison à tolérance.
-- ✅ Tests unitaires getHeatingCooling / getTargetTemperatureCommands / computeStates + validation manuelle chauffage↔clim.
+### Phase 2 — Thermostats Atlantic/Cozytouch ✅ TERMINÉE
+7. ✅ C3 : `getHeatingCooling()` n'est plus tributaire du parent — cascade parent →
+   états `core:Heating/CoolingOnOffState` du zone → commandes exposées → défaut
+   `Heating` avec warning **une seule fois** (plus de spam dans computeStates).
+8. ✅ O4 : tous les `>= 16` magiques remplacés par `this.MIN_TEMP`. O1 : le
+   `setTargetTemperature` redondant de la sous-classe Atlantic supprimé (hérite du
+   revert de la base). Généralisation d'un `onGet` à toute la base **non faite** à
+   dessein (risque de régression sur des sous-classes non couvertes par tests).
+9. ✅ O2 : court-circuit `value===targetState.value` retiré (permet de re-forcer un
+   device désynchronisé). O3 : `getProfile()` compare désormais avec tolérance
+   (0.5°C) via `getNumber`, au lieu d'un `===` de flottants.
+- ✅ Vérifié : `npm test` 27/27 (15 nouveaux : getHeatingCooling ×6, getProfile ×2,
+  getTargetTemperatureCommands ×3, computeStates ×4 dont anti-écrasement C2) ;
+  lint src+test 0 ; `tsc` OK ; build OK ; entrypoint se charge. Reste : validation
+  manuelle chauffage↔clim sur installation réelle.
 
 ### Phase 3 — Plateforme & hygiène
 10. O5 : encadrer les handlers process.

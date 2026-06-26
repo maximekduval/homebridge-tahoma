@@ -1,5 +1,5 @@
 import { Characteristics } from '../../Platform';
-import { Command, ExecutionState } from 'overkiz-client';
+import { Command } from 'overkiz-client';
 import HeatingSystem from '../HeatingSystem';
 
 export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem {
@@ -10,6 +10,8 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         Characteristics.TargetHeatingCoolingState.AUTO,
         Characteristics.TargetHeatingCoolingState.OFF,
     ];
+
+    private warnedHeatingCoolingFallback = false;
 
     protected applyConfig(config) {
         super.applyConfig(config);
@@ -63,7 +65,7 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             const heatingCooling = this.getHeatingCooling();
             const temp = this.device.get(`core:${heatingCooling}TargetTemperatureState`)
                       || this.device.get('core:TargetTemperatureState');
-            if (temp !== undefined && temp >= 16) {
+            if (temp !== undefined && temp >= this.MIN_TEMP) {
                 return temp;
             }
             return this.lastConfirmedTemperature ?? this.MIN_TEMP;
@@ -77,7 +79,7 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
                 this.onTemperatureUpdate(value);
                 break;
             case 'core:TargetTemperatureState':
-                if (value >= 16) {
+                if (value >= this.MIN_TEMP) {
                     this.lastConfirmedTemperature = value;
                     this.targetTemperature?.updateValue(value);
                 }
@@ -140,44 +142,57 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             this.targetState.updateValue(targetState);
         }
 
-        if (this.targetTemperature !== undefined && targetTemperature >= 16 && this.isIdle) {
+        if (this.targetTemperature !== undefined && targetTemperature >= this.MIN_TEMP && this.isIdle) {
             this.lastConfirmedTemperature = targetTemperature;
             this.targetTemperature.updateValue(targetTemperature);
         }
     }
 
-    protected async setTargetTemperature(value) {
-        const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
-        action.on('update', (state) => {
-            if (state === ExecutionState.FAILED && this.lastConfirmedTemperature !== undefined) {
-                this.warn('setTargetTemperature failed, reverting to', this.lastConfirmedTemperature);
-                this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
-            }
-        });
-    }
+    // setTargetTemperature is inherited from HeatingSystem: it already reverts to
+    // lastConfirmedTemperature on failure, so no override is needed here.
 
     /**
      * Helpers
      */
-    private getHeatingCooling() {
+    private getHeatingCooling(): 'Heating' | 'Cooling' {
+        // Preferred source: the parent zone-control operating mode.
         const operatingMode = this.device.parent?.get('io:PassAPCOperatingModeState');
         if (operatingMode === 'cooling') {
             return 'Cooling';
-        } else if (operatingMode === 'heating') {
-            return 'Heating';
-        } else {
-            this.warn(`getHeatingCooling: parent state is "${operatingMode}", defaulting to Heating`);
+        }
+        if (operatingMode === 'heating') {
             return 'Heating';
         }
+
+        // Parent state often unavailable (parent not mapped / not yet loaded).
+        // Infer from this zone's own on/off states before falling back.
+        const coolingOn = this.device.get('core:CoolingOnOffState') === 'on';
+        const heatingOn = this.device.get('core:HeatingOnOffState') === 'on';
+        if (coolingOn && !heatingOn) {
+            return 'Cooling';
+        }
+        if (heatingOn && !coolingOn) {
+            return 'Heating';
+        }
+
+        // Last resort: prefer the mode the device actually exposes commands for.
+        if (this.device.hasCommand('setCoolingOnOffState') && !this.device.hasCommand('setHeatingOnOffState')) {
+            return 'Cooling';
+        }
+        if (!this.warnedHeatingCoolingFallback) {
+            this.warnedHeatingCoolingFallback = true;
+            this.warn(`getHeatingCooling: operating mode is "${operatingMode}" and zone states are ambiguous, defaulting to Heating`);
+        }
+        return 'Heating';
     }
 
     private getProfile() {
         const heatingCooling = this.getHeatingCooling();
-        if (this.device.get(`core:Eco${heatingCooling}TargetTemperatureState`) === this.device.get('core:TargetTemperatureState')) {
-            return 'Eco';
-        } else {
-            return 'Comfort';
-        }
+        const eco = this.device.getNumber(`core:Eco${heatingCooling}TargetTemperatureState`);
+        const target = this.device.getNumber('core:TargetTemperatureState');
+        // Compare with tolerance: these are floating-point temperatures and exact
+        // equality is unreliable.
+        return Math.abs(eco - target) < 0.5 ? 'Eco' : 'Comfort';
     }
 
 }
