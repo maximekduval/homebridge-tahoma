@@ -61,11 +61,21 @@ Décisions actées :
   `npm run build` OK ; `npm test` vert (6 + 1 expected-fail) ; entrypoint
   `dist/index.js` se charge et enregistre la plateforme.
 
-### Phase 1 — Couche commandes/synchro
-4. C1 : poignée par-appel au lieu de rempiler sur l'Action partagée.
-5. C2 : flag « busy » synchrone ; `isIdle` fiable.
-6. C4 : gestion d'erreur/revert uniforme.
-- ✅ Tests : N commandes rapides → 1 exécution, 0 listener résiduel ; échec → 1 revert ; état retardé n'écrase pas la consigne en vol.
+### Phase 1 — Couche commandes/synchro ✅ TERMINÉE
+4. ✅ C0 : `mergeCommands()` remplace l'`addCommands` buggé d'overkiz-client — les
+   commandes distinctes batchées ne sont plus perdues.
+5. ✅ C2 : compteur `inFlight` synchrone (incrémenté à l'émission, décrémenté à
+   l'état terminal ou à l'échec d'envoi) ; `isIdle = inFlight===0 && !hasExecution`.
+   Ferme la fenêtre où un écho serveur écrasait la consigne juste envoyée.
+6. ✅ C1 : `action.setMaxListeners(0)` + libération unique via garde `settled` →
+   plus de warning de fuite EventEmitter sur l'action partagée.
+7. ✅ Gestion des états terminaux étendue (TIMED_OUT/NOT_TRANSMITTED) + `event?.`
+   défensif.
+- ✅ Vérifié : `npm test` 12/12 (dont C0 fixé + 4 tests C2 in-flight) ; lint 0 ;
+  `tsc` OK ; build OK ; entrypoint se charge.
+- ↪ C4 : la propagation des rejets vers HomeKit (setters non-debouncés) + le log
+  des erreurs du debounce (session précédente) sont jugés suffisants ; pas de
+  churn ajouté.
 
 ### Phase 2 — Thermostats Atlantic/Cozytouch
 7. C3 : déterminer le mode depuis les états du device (parent en fallback).

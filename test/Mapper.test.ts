@@ -42,12 +42,10 @@ describe('Mapper.executeCommands — command batching', () => {
         expect(platform.executeAction).toHaveBeenCalledTimes(1);
     });
 
-    // KNOWN BUG (C0): overkiz-client Action.addCommands iterates `this.commands`
-    // instead of the incoming `commands`, so a second distinct command sent to the
-    // same device within the batch window is silently dropped. This is a direct
-    // cause of "temperature sent but not applied". Phase 1 must work around it;
-    // when fixed, remove `.fails` and the test should pass.
-    it.fails('merges a second distinct command into the batched action', async () => {
+    // C0 fixed: a second distinct command sent to the same device within the
+    // batch window must be merged into the action (was silently dropped by the
+    // buggy overkiz-client Action.addCommands).
+    it('merges a second distinct command into the batched action', async () => {
         const { mapper } = makeMapper();
 
         const p1 = mapper.exec(new Command('a'));
@@ -56,6 +54,18 @@ describe('Mapper.executeCommands — command batching', () => {
         const [a1] = await Promise.all([p1, p2]);
 
         expect(a1.commands.map((c) => c.name)).toEqual(['a', 'b']);
+    });
+
+    it('replaces parameters when the same command is issued twice in the window', async () => {
+        const { mapper } = makeMapper();
+
+        const p1 = mapper.exec(new Command('setClosure', 30));
+        const p2 = mapper.exec(new Command('setClosure', 70));
+        await vi.advanceTimersByTimeAsync(100);
+        const [a1] = await Promise.all([p1, p2]);
+
+        expect(a1.commands).toHaveLength(1);
+        expect(a1.commands[0].parameters).toEqual([70]);
     });
 
     it('starts a fresh execution once the previous one has been flushed', async () => {
@@ -88,7 +98,7 @@ describe('Mapper.executeCommands — command batching', () => {
     });
 });
 
-describe('Mapper.executeCommands — update listeners (characterizes C1)', () => {
+describe('Mapper.executeCommands — update listeners (C1)', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
@@ -106,21 +116,76 @@ describe('Mapper.executeCommands — update listeners (characterizes C1)', () =>
         expect(seen).toEqual([ExecutionState.COMPLETED]);
     });
 
-    it('CHARACTERIZATION: batched callers share one Action, so listeners accumulate on it', async () => {
+    it('does not cap listeners on the shared batched action (no leak warning)', async () => {
         const { mapper } = makeMapper();
 
-        // Simulate several rapid HomeKit writes that each attach their own listener.
         const promises = [mapper.exec(new Command('a')), mapper.exec(new Command('b')), mapper.exec(new Command('c'))];
         await vi.advanceTimersByTimeAsync(100);
         const actions = await Promise.all(promises);
         actions.forEach((a) => a.on('update', () => undefined));
 
-        // All three resolved to the same Action — today every caller piles a
-        // listener onto this shared emitter (the C1 leak). This documents current
-        // behaviour; Phase 1 should make per-call listeners independent.
         expect(actions[0]).toBe(actions[1]);
-        expect(actions[0]).toBe(actions[2]);
-        // base listener (from executeCommands) + 3 from callers above.
-        expect(actions[0].listenerCount('update')).toBeGreaterThanOrEqual(4);
+        // maxListeners(0) means unlimited — many batched callers won't trip the
+        // EventEmitter leak warning.
+        expect(actions[0].getMaxListeners()).toBe(0);
+    });
+});
+
+describe('Mapper.isIdle — in-flight tracking (C2)', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('reports non-idle synchronously, before the execId is known', async () => {
+        const { mapper } = makeMapper();
+
+        // A command was just issued; the execution has not even been POSTed yet,
+        // so the client pool is empty — but the mapper must still report busy so
+        // a stale state echo cannot overwrite the new value.
+        const p = mapper.exec(new Command('a'));
+        expect(mapper.isIdle).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(100);
+        await p;
+        expect(mapper.isIdle).toBe(false); // execId now in pool (mock returns true below)
+    });
+
+    it('becomes idle again after the action reaches a terminal state', async () => {
+        const { platform, mapper } = makeMapper();
+        // Pool no longer holds the execution once it completed.
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+        expect(mapper.isIdle).toBe(false);
+
+        action.emit('update', ExecutionState.COMPLETED, {});
+        expect(mapper.isIdle).toBe(true);
+    });
+
+    it('releases the in-flight slot when the execution fails to start', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+        platform.executeAction.mockRejectedValueOnce(new Error('network down'));
+
+        const p = mapper.exec(new Command('a'));
+        const assertion = expect(p).rejects.toBeDefined();
+        await vi.advanceTimersByTimeAsync(100);
+        await assertion;
+
+        expect(mapper.isIdle).toBe(true);
+    });
+
+    it('stays busy until a TIMED_OUT terminal arrives', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+        expect(mapper.isIdle).toBe(false);
+
+        action.emit('update', ExecutionState.TIMED_OUT, null);
+        expect(mapper.isIdle).toBe(true);
     });
 });
