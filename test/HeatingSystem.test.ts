@@ -12,6 +12,8 @@ vi.mock('../src/Platform', () => ({
 }));
 
 import AtlanticZone from '../src/mappers/HeatingSystem/AtlanticPassAPCHeatingAndCoolingZone';
+import HeatingSystem from '../src/mappers/HeatingSystem';
+import WaterHeatingSystem from '../src/mappers/WaterHeatingSystem';
 import { FakePlatform, FakeDevice, FakeCharacteristic } from './helpers';
 
 function makeZone(deviceOpts = {}) {
@@ -20,6 +22,13 @@ function makeZone(deviceOpts = {}) {
     const zone = new AtlanticZone(platform as any, {} as any, device as any) as any;
     zone.MIN_TEMP = 16;
     return { platform, device, zone };
+}
+
+function makeHeating(deviceOpts = {}) {
+    const platform = new FakePlatform();
+    const device = new FakeDevice(deviceOpts);
+    const mapper = new HeatingSystem(platform as any, {} as any, device as any) as any;
+    return { platform, device, mapper };
 }
 
 describe('AtlanticPassAPCHeatingAndCoolingZone.getHeatingCooling (C3)', () => {
@@ -172,5 +181,65 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         platform.client.hasExecution.mockReturnValue(true);
         zone.computeStates();
         expect(zone.targetTemperature.value).toBe(23); // not clobbered by stale echo
+    });
+});
+
+describe('HeatingSystem (base) commands', () => {
+    it('maps target states to mode commands', () => {
+        const { mapper } = makeHeating();
+        const C = { OFF: 0, HEAT: 1, COOL: 2, AUTO: 3 };
+        expect(mapper.getTargetStateCommands(C.AUTO).name).toBe('auto');
+        expect(mapper.getTargetStateCommands(C.HEAT).name).toBe('heat');
+        expect(mapper.getTargetStateCommands(C.COOL).name).toBe('cool');
+        expect(mapper.getTargetStateCommands(C.OFF).name).toBe('off');
+    });
+
+    it('builds setTargetTemperature and setOn commands', () => {
+        const { mapper } = makeHeating();
+        const t = mapper.getTargetTemperatureCommands(19.5);
+        expect(t.name).toBe('setTargetTemperature');
+        expect(t.parameters).toEqual([19.5]);
+        expect(mapper.getOnCommands(true).name).toBe('setOn');
+    });
+});
+
+describe('HeatingSystem (base) onStateChanged', () => {
+    it('converts a Kelvin temperature to Celsius', () => {
+        const { mapper } = makeHeating();
+        mapper.currentTemperature = new FakeCharacteristic('CurrentTemperature', 0);
+        mapper.onStateChanged('core:TemperatureState', 293.15);
+        expect(mapper.currentTemperature.value).toBeCloseTo(20, 5);
+    });
+
+    it('passes a Celsius temperature through unchanged', () => {
+        const { mapper } = makeHeating();
+        mapper.currentTemperature = new FakeCharacteristic('CurrentTemperature', 0);
+        mapper.onStateChanged('core:TemperatureState', 20);
+        expect(mapper.currentTemperature.value).toBe(20);
+    });
+
+    it('records the confirmed target temperature', () => {
+        const { mapper } = makeHeating();
+        mapper.targetTemperature = new FakeCharacteristic('TargetTemperature', 0);
+        mapper.onStateChanged('core:TargetTemperatureState', 21);
+        expect(mapper.targetTemperature.value).toBe(21);
+        expect(mapper.lastConfirmedTemperature).toBe(21);
+    });
+
+    it('converts electric energy consumption from Wh to kWh', () => {
+        const { mapper } = makeHeating();
+        mapper.consumption = new FakeCharacteristic('TotalConsumption', 0);
+        mapper.onStateChanged('core:ElectricEnergyConsumptionState', 2500);
+        expect(mapper.consumption.value).toBe(2.5);
+    });
+});
+
+describe('WaterHeatingSystem', () => {
+    it('uses the DHW temperature range', () => {
+        const platform = new FakePlatform();
+        const device = new FakeDevice({ uiClass: 'WaterHeatingSystem', widgetName: 'WaterHeatingSystem' });
+        const mapper = new WaterHeatingSystem(platform as any, {} as any, device as any) as any;
+        expect(mapper.MIN_TEMP).toBe(45);
+        expect(mapper.MAX_TEMP).toBe(65);
     });
 });

@@ -110,7 +110,13 @@ Décisions actées :
 - ✅ Vérifié : lint src+test 0 ; `tsc` OK ; build OK ; `npm test` 27/27 ;
   entrypoint se charge.
 
-### Phase 4 — Couverture & CI
-13. Tests des mappers majeurs (RollerShutter, OnOff, Light, WaterHeatingSystem).
-14. CI lint+build+test.
-- ✅ Couverture cible cœur ; CI verte.
+### Phase 4 — Couverture & CI ✅ TERMINÉE
+13. ✅ Tests ajoutés : RollerShutter (inversion, commandes stateless/positionable,
+    mapping d'états + anti-écrasement en vol), OnOff, Light (commandes + états),
+    base HeatingSystem (commandes, conversion Kelvin→°C, Wh→kWh), WaterHeatingSystem.
+14. ✅ CI GitHub Actions (`.github/workflows/ci.yml`) : lint + build + test sur
+    Node 18/20/22, push & PR sur master.
+- ✅ Vérifié : `npm test` 48/48 ; lint 0 ; `tsc` OK ; build OK ; entrypoint se charge.
+- Note couverture : ciblée sur la logique sujette aux bugs (couche commandes,
+  calcul de mode, mapping d'états). Le câblage `registerService`/homebridge reste
+  non couvert (nécessiterait un faux HAP complet) — investissement séparé.
