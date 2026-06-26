@@ -79,7 +79,13 @@ export default class HeatingSystem extends Mapper {
             this.consumption = service.getCharacteristic(TotalConsumptionCharacteristic);
         }
 
-        this.targetState?.onSet(this.setTargetState.bind(this));
+        // Fire-and-forget: don't let HomeKit wait for the HTTP round-trip.
+        // If onSet blocks (e.g. the Overkiz pool is full), HomeKit times out and
+        // shows "No Response" for the whole accessory. Errors are handled inside
+        // setTargetState (retry + UI revert), so no feedback is lost.
+        this.targetState?.onSet((value) => {
+            this.setTargetState(value).catch(e => this.error('setTargetState failed:', e));
+        });
         this.targetTemperature?.onSet(this.debounce(this.setTargetTemperature));
         return service;
     }
@@ -88,7 +94,9 @@ export default class HeatingSystem extends Mapper {
         const service = this.registerService(Services.Switch, subtype);
         this.on = service.getCharacteristic(Characteristics.On);
 
-        this.on?.onSet(this.setOn.bind(this));
+        this.on?.onSet((value) => {
+            this.setOn(value).catch(e => this.error('setOn failed:', e));
+        });
         return service;
     }
 
@@ -185,7 +193,7 @@ export default class HeatingSystem extends Mapper {
 
     protected sendProgCommands() {
         if (this.targetState?.value !== Characteristics.TargetHeatingCoolingState.OFF) {
-            this.executeCommands(this.getProgCommands());
+            this.executeCommands(this.getProgCommands()).catch(e => this.error('sendProgCommands failed:', e));
         }
     }
 
