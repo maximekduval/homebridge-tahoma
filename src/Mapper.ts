@@ -180,6 +180,10 @@ export default abstract class Mapper {
             action.setMaxListeners(0);
             this.actionPromise.action = action;
             let settled = false;
+            // Some devices (e.g. AtlanticPassAPC zones) emit NOT_TRANSMITTED as an
+            // intermediate step before COMPLETED or FAILED. Delay settling so we don't
+            // prematurely release the in-flight guard and let stale echoes overwrite the UI.
+            let notTransmittedTimer: ReturnType<typeof setTimeout> | null = null;
             action.on('update', (state, event) => {
                 if (state === ExecutionState.FAILED) {
                     this.error(commandName, event?.failureType);
@@ -190,9 +194,27 @@ export default abstract class Mapper {
                 } else {
                     this.debug(commandName, state);
                 }
-                if (!settled && this.isTerminalState(state)) {
-                    settled = true;
-                    this.inFlight = Math.max(0, this.inFlight - 1);
+                if (!settled) {
+                    if (state === ExecutionState.NOT_TRANSMITTED) {
+                        // NOT_TRANSMITTED may be followed by COMPLETED/FAILED within seconds.
+                        // Use a fallback timer: if no real terminal state arrives, settle then.
+                        if (notTransmittedTimer === null) {
+                            notTransmittedTimer = setTimeout(() => {
+                                if (!settled) {
+                                    settled = true;
+                                    this.inFlight = Math.max(0, this.inFlight - 1);
+                                    this.debug(commandName, 'NOT_TRANSMITTED — no further event from gateway, marking as terminal');
+                                }
+                            }, 30_000);
+                        }
+                    } else if (this.isTerminalState(state)) {
+                        if (notTransmittedTimer !== null) {
+                            clearTimeout(notTransmittedTimer);
+                            notTransmittedTimer = null;
+                        }
+                        settled = true;
+                        this.inFlight = Math.max(0, this.inFlight - 1);
+                    }
                 }
             });
         }
@@ -200,10 +222,10 @@ export default abstract class Mapper {
     }
 
     private isTerminalState(state): boolean {
+        // NOT_TRANSMITTED is handled separately with a delayed fallback timer.
         return state === ExecutionState.COMPLETED ||
             state === ExecutionState.FAILED ||
-            state === ExecutionState.TIMED_OUT ||
-            state === ExecutionState.NOT_TRANSMITTED;
+            state === ExecutionState.TIMED_OUT;
     }
 
     /**
