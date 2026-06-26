@@ -13,8 +13,8 @@
     "url": "https://github.com/dubocr/homebridge-tahoma/issues"
   },
   "engines": {
-    "node": ">=12.4.0",
-    "homebridge": ">=1.3.0"
+    "node": ">=18.0.0",
+    "homebridge": ">=1.6.0"
   },
   "main": "dist/index.js",
   "scripts": {

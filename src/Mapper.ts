@@ -9,7 +9,6 @@ export default abstract class Mapper {
     private postponeTimer;
     private debounceTimer;
     protected stateless = false;
-    //protected config: Record<string, string | boolean | number> = {};
     private executionId;
     private actionPromise;
     // Number of commands/executions started by this mapper that have not yet
@@ -95,14 +94,6 @@ export default abstract class Mapper {
             service = this.accessory.getService(type) || this.accessory.addService(type);
         }
         service.setCharacteristic(Characteristics.Name, name);
-        /*
-        service.getCharacteristic(Characteristics.Name)
-            .updateValue(name)
-            .onSet((value) => {
-                this.debug('Will rename ' + name + ' to ' + value);
-                this.platform.client.setDeviceName(this.device.deviceURL, value);
-            });
-        */
         return service;
     }
 

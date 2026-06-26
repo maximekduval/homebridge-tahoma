@@ -93,11 +93,22 @@ Décisions actées :
   lint src+test 0 ; `tsc` OK ; build OK ; entrypoint se charge. Reste : validation
   manuelle chauffage↔clim sur installation réelle.
 
-### Phase 3 — Plateforme & hygiène
-10. O5 : encadrer les handlers process.
-11. Plafonner le backoff `discoverDevices` ; décider réconciliation accessoires.
-12. Q4/Q5/Q6 : code mort, engines, `noImplicitAny` progressif.
-- ✅ tsc strict OK fichiers migrés ; backoff plafonné ; pas d'accessoires fantômes.
+### Phase 3 — Plateforme & hygiène ✅ TERMINÉE
+10. ✅ O5 : handlers `process` (`unhandledRejection`/`uncaughtException`) installés
+    une seule fois via garde module-level (`processHandlersInstalled`) + messages
+    étiquetés. Évite la fuite/duplication avec plusieurs comptes TaHoma.
+11. ✅ Backoff `discoverDevices` plafonné à `MAX_RETRY_DELAY = 600s`
+    (`Math.min(retryDelay*2, MAX)`). Réconciliation : confirmée déléguée au
+    `mapper.build()` (qui retire déjà les services obsolètes) → bloc mort en
+    doublon supprimé.
+12. ✅ Q4 : code mort retiré (bloc `renommage` commenté dans `registerService`,
+    champ `config` commenté, blocs commentés de `discoverDevices`). Q5 :
+    `engines.node` `>=12.4.0` → `>=18.0.0`, `homebridge` → `>=1.6.0`.
+    Q6 (`noImplicitAny`) **différé** : activer toucherait des dizaines de fichiers
+    (params `value`/`name`/`config` non typés) — trop risqué hors d'un chantier
+    dédié.
+- ✅ Vérifié : lint src+test 0 ; `tsc` OK ; build OK ; `npm test` 27/27 ;
+  entrypoint se charge.
 
 ### Phase 4 — Couverture & CI
 13. Tests des mappers majeurs (RollerShutter, OnOff, Light, WaterHeatingSystem).
