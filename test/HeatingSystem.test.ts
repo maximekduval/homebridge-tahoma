@@ -139,7 +139,7 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         expect(zone.targetState.value).toBe(0); // TargetHeatingCoolingState.OFF
     });
 
-    it('reports AUTO and applies the confirmed target temperature when heating and idle', () => {
+    it('reports HEAT and applies the confirmed target temperature when heating and idle', () => {
         const { zone } = makeZone({
             states: {
                 'core:HeatingOnOffState': 'on',
@@ -149,7 +149,7 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         withCharacteristics(zone);
         zone.currentTemperature.value = 19; // below target -> actively heating
         zone.computeStates();
-        expect(zone.targetState.value).toBe(3); // AUTO
+        expect(zone.targetState.value).toBe(1); // HEAT
         expect(zone.currentState.value).toBe(1); // HEAT
         expect(zone.targetTemperature.value).toBe(21);
         expect(zone.lastConfirmedTemperature).toBe(21);
