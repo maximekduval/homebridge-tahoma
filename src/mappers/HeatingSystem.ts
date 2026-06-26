@@ -1,5 +1,5 @@
 import { Characteristics, Services } from '../Platform';
-import { Characteristic, Service } from 'homebridge';
+import { Characteristic, CharacteristicValue, Service } from 'homebridge';
 import { Command, ExecutionState } from 'overkiz-client';
 import Mapper from '../Mapper';
 import { EcoCharacteristic, ProgCharacteristic, TotalConsumptionCharacteristic } from '../CustomCharacteristics';
@@ -17,6 +17,7 @@ export default class HeatingSystem extends Mapper {
     protected targetTemperature: Characteristic | undefined;
     protected currentState: Characteristic | undefined;
     protected targetState: Characteristic | undefined;
+    protected lastConfirmedTemperature: CharacteristicValue | undefined;
 
     protected on: Characteristic | undefined;
 
@@ -132,7 +133,13 @@ export default class HeatingSystem extends Mapper {
     }
 
     protected async setTargetTemperature(value) {
-        await this.executeCommands(this.getTargetTemperatureCommands(value));
+        const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
+        action.on('update', (state) => {
+            if (state === ExecutionState.FAILED && this.lastConfirmedTemperature !== undefined) {
+                this.warn('setTargetTemperature failed, reverting to', this.lastConfirmedTemperature);
+                this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
+            }
+        });
     }
 
     protected getOnCommands(value): Command | Array<Command> | undefined {
@@ -168,6 +175,7 @@ export default class HeatingSystem extends Mapper {
         switch (name) {
             case 'core:TemperatureState': this.onTemperatureUpdate(value); break;
             case 'core:TargetTemperatureState':
+                this.lastConfirmedTemperature = value;
                 this.targetTemperature?.updateValue(value);
                 break;
             case 'core:ElectricEnergyConsumptionState':

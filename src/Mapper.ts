@@ -120,7 +120,7 @@ export default abstract class Mapper {
             } else {
                 this.debounceTimer = setTimeout(async () => {
                     this.debounceTimer = null;
-                    task.bind(this, value)().catch(() => null);
+                    task.bind(this, value)().catch((err) => this.error('Command failed:', err));
                 }, 500);
             }
         };

@@ -1,5 +1,5 @@
 import { Characteristics } from '../../Platform';
-import { Command } from 'overkiz-client';
+import { Command, ExecutionState } from 'overkiz-client';
 import HeatingSystem from '../HeatingSystem';
 
 export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem {
@@ -10,8 +10,6 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         Characteristics.TargetHeatingCoolingState.AUTO,
         Characteristics.TargetHeatingCoolingState.OFF,
     ];
-
-    private refreshStatesTimeout;
 
     protected applyConfig(config) {
         super.applyConfig(config);
@@ -59,6 +57,20 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         }
     }
 
+    protected registerMainService() {
+        const service = super.registerMainService();
+        this.targetTemperature?.onGet(() => {
+            const heatingCooling = this.getHeatingCooling();
+            const temp = this.device.get(`core:${heatingCooling}TargetTemperatureState`)
+                      || this.device.get('core:TargetTemperatureState');
+            if (temp !== undefined && temp >= 16) {
+                return temp;
+            }
+            return this.lastConfirmedTemperature ?? this.MIN_TEMP;
+        });
+        return service;
+    }
+
     protected onStateChanged(name, value) {
         switch (name) {
             case 'core:TemperatureState':
@@ -66,8 +78,13 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
                 break;
             case 'core:TargetTemperatureState':
                 if (value >= 16) {
+                    this.lastConfirmedTemperature = value;
                     this.targetTemperature?.updateValue(value);
                 }
+                break;
+            case 'core:CoolingTargetTemperatureState':
+            case 'core:HeatingTargetTemperatureState':
+                this.postpone(this.computeStates);
                 break;
             case 'core:HeatingOnOffState':
             case 'core:CoolingOnOffState':
@@ -92,7 +109,7 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             targetState = Characteristics.TargetHeatingCoolingState.OFF;
             this.currentState?.updateValue(Characteristics.CurrentHeatingCoolingState.OFF);
         } else {
-            targetTemperature = targetTemperature = this.device.get(`core:${heatingCooling}TargetTemperatureState`) ||
+            targetTemperature = this.device.get(`core:${heatingCooling}TargetTemperatureState`) ||
                 this.device.get('core:TargetTemperatureState');
             const currentTemperature = this.currentTemperature?.value || targetTemperature;
             if (heatingCooling === 'Heating') {
@@ -124,8 +141,19 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         }
 
         if (this.targetTemperature !== undefined && targetTemperature >= 16 && this.isIdle) {
+            this.lastConfirmedTemperature = targetTemperature;
             this.targetTemperature.updateValue(targetTemperature);
         }
+    }
+
+    protected async setTargetTemperature(value) {
+        const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
+        action.on('update', (state) => {
+            if (state === ExecutionState.FAILED && this.lastConfirmedTemperature !== undefined) {
+                this.warn('setTargetTemperature failed, reverting to', this.lastConfirmedTemperature);
+                this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
+            }
+        });
     }
 
     /**
@@ -135,7 +163,10 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         const operatingMode = this.device.parent?.get('io:PassAPCOperatingModeState');
         if (operatingMode === 'cooling') {
             return 'Cooling';
+        } else if (operatingMode === 'heating') {
+            return 'Heating';
         } else {
+            this.warn(`getHeatingCooling: parent state is "${operatingMode}", defaulting to Heating`);
             return 'Heating';
         }
     }
@@ -149,21 +180,4 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         }
     }
 
-    private launchRefreshStates() {
-        clearTimeout(this.refreshStatesTimeout);
-        this.refreshStatesTimeout = setTimeout(() => {
-            const commands = [
-                new Command('refreshTargetTemperature'),
-                new Command('refreshPassAPCHeatingProfile'),
-            ];
-            this.executeCommands(commands);
-        }, 30 * 1000);
-    }
-
-    private launchRefreshTemperature() {
-        clearTimeout(this.refreshStatesTimeout);
-        this.refreshStatesTimeout = setTimeout(() => {
-            this.executeCommands(new Command('refreshTargetTemperature'));
-        }, 30 * 1000);
-    }
 }
