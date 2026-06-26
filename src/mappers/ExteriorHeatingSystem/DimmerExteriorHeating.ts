@@ -1,4 +1,4 @@
-import { Characteristic, Service } from 'homebridge';
+import { Characteristic } from 'homebridge';
 import { Command, ExecutionState } from 'overkiz-client';
 import { Characteristics, Services } from '../../Platform';
 import ExteriorHeatingSystem from '../ExteriorHeatingSystem';

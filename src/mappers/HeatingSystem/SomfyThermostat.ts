@@ -1,5 +1,5 @@
 import { Characteristics } from '../../Platform';
-import { Command, ExecutionState } from 'overkiz-client';
+import { Command } from 'overkiz-client';
 import HeatingSystem from '../HeatingSystem';
 
 export default class SomfyThermostat extends HeatingSystem {
@@ -11,6 +11,7 @@ export default class SomfyThermostat extends HeatingSystem {
         Characteristics.TargetHeatingCoolingState.COOL,
         Characteristics.TargetHeatingCoolingState.OFF,
     ];
+
     private lastRefresh = Date.now();
 
     protected registerMainService() {

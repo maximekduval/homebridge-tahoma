@@ -8,8 +8,8 @@ export default class WaterDetectionSensor extends ContactSensor {
                 this.state?.updateValue(
                     value === 'detected' ? 
                         Characteristics.ContactSensorState.CONTACT_DETECTED :
-                        Characteristics.ContactSensorState.CONTACT_NOT_DETECTED
-                    );
+                        Characteristics.ContactSensorState.CONTACT_NOT_DETECTED,
+                );
                 break;
         }
     }

@@ -1,4 +1,4 @@
-import { Characteristics, Services } from '../Platform';
+import { Services } from '../Platform';
 import { Service } from 'homebridge';
 import Mapper from '../Mapper';
 

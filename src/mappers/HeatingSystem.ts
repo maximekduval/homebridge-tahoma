@@ -50,7 +50,7 @@ export default class HeatingSystem extends Mapper {
 
         this.targetState?.setProps({ validValues: this.TARGET_MODES });
         this.targetTemperature?.setProps({ minValue: this.MIN_TEMP, maxValue: this.MAX_TEMP, minStep: 0.5 });
-        const temp = Number(this.targetTemperature.value)
+        const temp = Number(this.targetTemperature.value);
         if (this.targetTemperature && temp < this.targetTemperature.props.minValue!) {
             this.targetTemperature.value = this.targetTemperature.props.minValue!;
         }

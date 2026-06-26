@@ -18,11 +18,14 @@
   },
   "main": "dist/index.js",
   "scripts": {
-    "lint": "eslint src/**.ts",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "watch": "npm run build && npm link && nodemon",
     "clean": "rimraf ./dist",
     "build": "rimraf ./dist && tsc",
-    "prepublishOnly": "npm run lint && npm run build && npm version patch --m 'Release %s'",
+    "prepublishOnly": "npm run lint && npm run test && npm run build && npm version patch --m 'Release %s'",
     "postpublish": "npm run clean"
   },
   "keywords": [
@@ -41,12 +44,14 @@
     "@types/node": "^22.8.7",
     "@typescript-eslint/eslint-plugin": "^8.13.0",
     "@typescript-eslint/parser": "^8.13.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^9.14.0",
     "homebridge": "^1.8.5",
     "nodemon": "^3.1.7",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.9"
   },
   "funding": {
     "url": "https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=L4X489MG7FUCN"

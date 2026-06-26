@@ -45,7 +45,7 @@ export default class AtlanticPassAPCZoneControl extends HeatingSystem {
         }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     protected getTargetTemperatureCommands(value): Command | Array<Command> {
         return [];
     }

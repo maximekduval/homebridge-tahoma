@@ -52,9 +52,9 @@ export class Platform implements DynamicPlatformPlugin {
         const logger = Object.assign({}, log, {
             debug: (...args) => {
                 if (config['debug']) {
-                    log.info('\x1b[90m', ...args)
+                    log.info('\x1b[90m', ...args);
                 } else {
-                    log.debug(args.shift(), ...args)
+                    log.debug(args.shift(), ...args);
                 }
             },
         });
