@@ -1,5 +1,5 @@
 import { Characteristics, Services } from '../Platform';
-import { Characteristic, Service } from 'homebridge';
+import { Characteristic, CharacteristicValue, Service } from 'homebridge';
 import { Command, ExecutionState } from 'overkiz-client';
 import Mapper from '../Mapper';
 import { EcoCharacteristic, ProgCharacteristic, TotalConsumptionCharacteristic } from '../CustomCharacteristics';
@@ -17,6 +17,7 @@ export default class HeatingSystem extends Mapper {
     protected targetTemperature: Characteristic | undefined;
     protected currentState: Characteristic | undefined;
     protected targetState: Characteristic | undefined;
+    protected lastConfirmedTemperature: CharacteristicValue | undefined;
 
     protected on: Characteristic | undefined;
 
@@ -49,7 +50,7 @@ export default class HeatingSystem extends Mapper {
 
         this.targetState?.setProps({ validValues: this.TARGET_MODES });
         this.targetTemperature?.setProps({ minValue: this.MIN_TEMP, maxValue: this.MAX_TEMP, minStep: 0.5 });
-        const temp = Number(this.targetTemperature.value)
+        const temp = Number(this.targetTemperature.value);
         if (this.targetTemperature && temp < this.targetTemperature.props.minValue!) {
             this.targetTemperature.value = this.targetTemperature.props.minValue!;
         }
@@ -107,9 +108,9 @@ export default class HeatingSystem extends Mapper {
     }
 
     protected async setTargetState(value) {
-        if (value === this.targetState?.value) {
-            return;
-        }
+        // Note: we intentionally do not short-circuit when value equals the
+        // current target state — that prevented re-issuing a command to re-sync
+        // a device whose real state had drifted from HomeKit's.
         const action = await this.executeCommands(this.getTargetStateCommands(value));
         action.on('update', (state) => {
             switch (state) {
@@ -132,7 +133,13 @@ export default class HeatingSystem extends Mapper {
     }
 
     protected async setTargetTemperature(value) {
-        await this.executeCommands(this.getTargetTemperatureCommands(value));
+        const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
+        action.on('update', (state) => {
+            if (state === ExecutionState.FAILED && this.lastConfirmedTemperature !== undefined) {
+                this.warn('setTargetTemperature failed, reverting to', this.lastConfirmedTemperature);
+                this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
+            }
+        });
     }
 
     protected getOnCommands(value): Command | Array<Command> | undefined {
@@ -168,6 +175,7 @@ export default class HeatingSystem extends Mapper {
         switch (name) {
             case 'core:TemperatureState': this.onTemperatureUpdate(value); break;
             case 'core:TargetTemperatureState':
+                this.lastConfirmedTemperature = value;
                 this.targetTemperature?.updateValue(value);
                 break;
             case 'core:ElectricEnergyConsumptionState':

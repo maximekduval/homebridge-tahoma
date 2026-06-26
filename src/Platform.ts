@@ -12,6 +12,14 @@ export let Services: typeof Service;
 export let Characteristics: typeof Characteristic;
 
 const DEFAULT_RETRY_DELAY = 60;
+// Cap the exponential backoff used when device discovery fails so the retry
+// interval cannot grow without bound.
+const MAX_RETRY_DELAY = 600;
+
+// Process-wide error handlers must be installed only once, even if several
+// platform instances are configured (e.g. multiple TaHoma accounts), otherwise
+// each instance adds its own listener and Node warns about a leak.
+let processHandlersInstalled = false;
 
 /**
  * HomebridgePlatform
@@ -37,8 +45,11 @@ export class Platform implements DynamicPlatformPlugin {
         new CustomCharacteristics(this.api.hap);
         this.log.debug('Finished initializing platform:', this.config.name);
 
-        process.on('unhandledRejection', (error: any) => this.log.error(error));
-        process.on('uncaughtException', (error: any) => this.log.error(error));
+        if (!processHandlersInstalled) {
+            processHandlersInstalled = true;
+            process.on('unhandledRejection', (error: any) => this.log.error('Unhandled rejection:', error));
+            process.on('uncaughtException', (error: any) => this.log.error('Uncaught exception:', error));
+        }
 
         this.exclude = config.exclude || [];
         this.exclude.push('Pod', 'ConfigurationComponent', 'NetworkComponent', 'ProtocolGateway', 'ConsumptionSensor',
@@ -52,9 +63,9 @@ export class Platform implements DynamicPlatformPlugin {
         const logger = Object.assign({}, log, {
             debug: (...args) => {
                 if (config['debug']) {
-                    log.info('\x1b[90m', ...args)
+                    log.info('\x1b[90m', ...args);
                 } else {
-                    log.debug(args.shift(), ...args)
+                    log.debug(args.shift(), ...args);
                 }
             },
         });
@@ -123,28 +134,14 @@ export class Platform implements DynamicPlatformPlugin {
                     continue;
                 }
 
-                // see if an accessory with the same uuid has already been registered and restored from
-                // the cached devices we stored in the `configureAccessory` method above
+                // Reuse the cached accessory restored in `configureAccessory`, or
+                // create it if this device is new. Service reconciliation for an
+                // existing accessory is handled by the mapper's build() below.
                 let accessory = this.accessories.find(accessory => accessory.UUID === device.uuid);
 
-                if (accessory) {
-                    // the accessory already exists
-                    //this.log.info('Updating accessory:', accessory.displayName);
-                    /*
-                    const newaccessory = new this.api.platformAccessory(device.label, device.uuid);
-                    newaccessory.context.device = device;
-                    await this.configureAccessory(newaccessory);
-                    const services = newaccessory.services.map((service) => service.UUID);
-                    accessory.services
-                        .filter((service) => !services.includes(service.UUID))
-                        .forEach((services) => accessory?.removeService(services));
-                    this.api.updatePlatformAccessories([accessory]);
-                    */
-                } else {
-                    // the accessory does not yet exist, so we need to create it
+                if (!accessory) {
                     this.log.info('Create accessory:', device.label);
                     accessory = new this.api.platformAccessory(device.label, device.uuid);
-                    //accessory.context.device = device;
                     await this.configureAccessory(accessory);
                     this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
                 }
@@ -195,7 +192,7 @@ export class Platform implements DynamicPlatformPlugin {
             this.log.error(error);
             this.log.error('Retry in ' + this.retryDelay + ' sec...');
             setTimeout(this.discoverDevices.bind(this), this.retryDelay * 1000);
-            this.retryDelay *= 2;
+            this.retryDelay = Math.min(this.retryDelay * 2, MAX_RETRY_DELAY);
         }
     }
 

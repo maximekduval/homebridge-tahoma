@@ -9,9 +9,13 @@ export default abstract class Mapper {
     private postponeTimer;
     private debounceTimer;
     protected stateless = false;
-    //protected config: Record<string, string | boolean | number> = {};
     private executionId;
     private actionPromise;
+    // Number of commands/executions started by this mapper that have not yet
+    // reached a terminal state. Tracked synchronously so `isIdle` is reliable
+    // during the batch + execution window (avoids stale server echoes
+    // overwriting a value the user just set).
+    private inFlight = 0;
     protected expectedStates: Array<string> = [];
 
     constructor(
@@ -77,7 +81,6 @@ export default abstract class Mapper {
     /**
      * Helper methods
      */
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     protected applyConfig(config) {
         //
     }
@@ -91,14 +94,6 @@ export default abstract class Mapper {
             service = this.accessory.getService(type) || this.accessory.addService(type);
         }
         service.setCharacteristic(Characteristics.Name, name);
-        /*
-        service.getCharacteristic(Characteristics.Name)
-            .updateValue(name)
-            .onSet((value) => {
-                this.debug('Will rename ' + name + ' to ' + value);
-                this.platform.client.setDeviceName(this.device.deviceURL, value);
-            });
-        */
         return service;
     }
 
@@ -120,7 +115,7 @@ export default abstract class Mapper {
             } else {
                 this.debounceTimer = setTimeout(async () => {
                     this.debounceTimer = null;
-                    task.bind(this, value)().catch(() => null);
+                    task.bind(this, value)().catch((err) => this.error('Command failed:', err));
                 }, 500);
             }
         };
@@ -140,37 +135,37 @@ export default abstract class Mapper {
         if (commands === undefined || (Array.isArray(commands) && commands.length === 0)) {
             this.error('No target command for', this.device.label);
             throw HAPStatus.RESOURCE_DOES_NOT_EXIST;
-        } else if (Array.isArray(commands)) {
-            for (const c of commands) {
-                this.info(c.name + JSON.stringify(c.parameters));
-            }
-        } else {
-            this.info(commands.name + JSON.stringify(commands.parameters));
-            commands = [commands];
+        }
+        const commandList = Array.isArray(commands) ? commands : [commands];
+        for (const c of commandList) {
+            this.info(c.name + JSON.stringify(c.parameters));
         }
 
-        const commandName = commands[0].name;
+        const commandName = commandList[0].name;
         const localizedName = this.platform.translate(
-            commands[0].name + (commands[0].parameters.length > 0 ? '.' + commands[0].parameters[0] : ''),
+            commandName + (commandList[0].parameters.length > 0 ? '.' + commandList[0].parameters[0] : ''),
         );
-        /*
-        if (!this.isIdle) {
-            this.cancelExecution();
-        }
-        */
 
         const highPriority = this.device.hasState('io:PriorityLockLevelState') ? true : false;
         const label = this.device.label + ' - ' + localizedName;
 
         if (this.actionPromise) {
-            this.actionPromise.action.addCommands(commands);
+            // Within the batch window: merge into the pending action. We do this
+            // here rather than via Action.addCommands(), which has a bug
+            // (iterates the existing commands instead of the new ones) that
+            // silently drops a second distinct command for the same device.
+            this.mergeCommands(this.actionPromise.action, commandList);
         } else {
+            this.inFlight++;
             this.actionPromise = new Promise((resolve, reject) => {
                 setTimeout(async () => {
                     try {
                         this.executionId = await this.platform.executeAction(label, this.actionPromise.action, highPriority, standalone);
                         resolve(this.actionPromise.action);
                     } catch (error: any) {
+                        // The execution never started, so no terminal event will
+                        // arrive to release the in-flight slot: release it here.
+                        this.inFlight = Math.max(0, this.inFlight - 1);
                         this.error(commandName + ' ' + error.message);
                         reject(HAPStatus.SERVICE_COMMUNICATION_FAILURE);
                     }
@@ -178,18 +173,53 @@ export default abstract class Mapper {
                 }, 100);
 
             });
-            this.actionPromise.action = new Action(this.device.deviceURL, commands);
-            this.actionPromise.action.on('update', (state, event) => {
+            const action = new Action(this.device.deviceURL, commandList);
+            // Each caller attaches its own per-concern 'update' listener; allow
+            // an unbounded count so batched callers don't trip the EventEmitter
+            // leak warning.
+            action.setMaxListeners(0);
+            this.actionPromise.action = action;
+            let settled = false;
+            action.on('update', (state, event) => {
                 if (state === ExecutionState.FAILED) {
-                    this.error(commandName, event.failureType);
+                    this.error(commandName, event?.failureType);
                 } else if (state === ExecutionState.COMPLETED) {
                     this.info(commandName, state);
+                } else if (state === ExecutionState.TIMED_OUT || state === ExecutionState.NOT_TRANSMITTED) {
+                    this.warn(commandName, state);
                 } else {
                     this.debug(commandName, state);
+                }
+                if (!settled && this.isTerminalState(state)) {
+                    settled = true;
+                    this.inFlight = Math.max(0, this.inFlight - 1);
                 }
             });
         }
         return this.actionPromise;
+    }
+
+    private isTerminalState(state): boolean {
+        return state === ExecutionState.COMPLETED ||
+            state === ExecutionState.FAILED ||
+            state === ExecutionState.TIMED_OUT ||
+            state === ExecutionState.NOT_TRANSMITTED;
+    }
+
+    /**
+     * Merge new commands into a pending action, replacing parameters of a
+     * command already queued with the same name (latest value wins) or
+     * appending it otherwise.
+     */
+    private mergeCommands(action: Action, commands: Array<Command>) {
+        for (const command of commands) {
+            const existing = action.commands.find((c) => c.name === command.name);
+            if (existing) {
+                existing.parameters = command.parameters;
+            } else {
+                action.commands.push(command);
+            }
+        }
     }
 
     private async delay(duration) {
@@ -251,9 +281,13 @@ export default abstract class Mapper {
         });
     }
 
-    // OLD
     get isIdle() {
-        return !this.platform.client.hasExecution(this.executionId);
+        // Idle only when this mapper has no command being batched/executed AND
+        // the last tracked execution has left the client pool. The in-flight
+        // counter closes the window between issuing a command and the execId
+        // becoming known, during which the pool check alone would wrongly
+        // report idle and let a stale state echo overwrite the new value.
+        return this.inFlight === 0 && !this.platform.client.hasExecution(this.executionId);
     }
 
     async cancelExecution() {

@@ -15,7 +15,7 @@ export default class WaterSensor extends Mapper {
         switch (name) {
             case 'core:WaterDetectionState':
                 this.leak?.updateValue(
-                    value === 'detected' ? Characteristics.LeakDetected.LEAK_DETECTED : Characteristics.LeakDetected.LEAK_NOT_DETECTED
+                    value === 'detected' ? Characteristics.LeakDetected.LEAK_DETECTED : Characteristics.LeakDetected.LEAK_NOT_DETECTED,
                 );
                 break;
         }

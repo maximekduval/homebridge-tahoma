@@ -2,7 +2,6 @@ import { Characteristic, Perms } from 'homebridge';
 import { Characteristics } from '../../Platform';
 import { Command } from 'overkiz-client';
 import HeatingSystem from '../HeatingSystem';
-import { TotalConsumptionCharacteristic } from '../../CustomCharacteristics';
 
 export default class AtlanticPassAPCHeatPump extends HeatingSystem {
     protected MIN_TEMP = 0;
@@ -12,6 +11,7 @@ export default class AtlanticPassAPCHeatPump extends HeatingSystem {
         Characteristics.TargetHeatingCoolingState.COOL,
         Characteristics.TargetHeatingCoolingState.OFF,
     ];
+
     protected consumption: Characteristic | undefined;
 
     protected registerMainService() {
@@ -37,7 +37,6 @@ export default class AtlanticPassAPCHeatPump extends HeatingSystem {
         }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     protected getTargetTemperatureCommands(value): Command | Array<Command> {
         return [];
     }

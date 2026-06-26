@@ -1,4 +1,3 @@
-import { Services } from '../../Platform';
 import { Characteristic } from 'homebridge';
 import { CurrentConsumptionCharacteristic, TotalConsumptionCharacteristic } from '../../CustomCharacteristics';
 import ElectricitySensor from '../ElectricitySensor';
