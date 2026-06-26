@@ -107,12 +107,20 @@ export default class HeatingSystem extends Mapper {
         }
     }
 
-    protected async setTargetState(value) {
+    protected readonly MAX_COMMAND_RETRIES = 5;
+
+    // Failure types that are transient (gateway/transport glitch) and worth retrying.
+    protected isRetryable(failureType?: string): boolean {
+        return failureType === 'DATA_TRANSPORT_SERVICE_ERROR' ||
+               failureType === 'DATA_TRANSPORT_SERVICE_ABORTED_BY_RECIPIENT';
+    }
+
+    protected async setTargetState(value, attempt = 0) {
         // Note: we intentionally do not short-circuit when value equals the
         // current target state — that prevented re-issuing a command to re-sync
         // a device whose real state had drifted from HomeKit's.
         const action = await this.executeCommands(this.getTargetStateCommands(value));
-        action.on('update', (state) => {
+        action.on('update', (state, event) => {
             switch (state) {
                 case ExecutionState.COMPLETED:
                     if (this.stateless) {
@@ -120,7 +128,13 @@ export default class HeatingSystem extends Mapper {
                     }
                     break;
                 case ExecutionState.FAILED:
-                    if (this.currentState) {
+                    if (attempt < this.MAX_COMMAND_RETRIES && this.isRetryable(event?.failureType)) {
+                        const delay = Math.min(2 ** attempt * 1_000, 30_000);
+                        this.warn(`setTargetState failed (${event.failureType}), retry ${attempt + 1}/${this.MAX_COMMAND_RETRIES} in ${delay / 1000}s`);
+                        setTimeout(() => {
+                            this.setTargetState(value, attempt + 1).catch(e => this.error('setTargetState retry failed:', e));
+                        }, delay);
+                    } else if (this.currentState) {
                         this.targetState?.updateValue(this.currentState.value);
                     }
                     break;
@@ -132,12 +146,20 @@ export default class HeatingSystem extends Mapper {
         return new Command('setTargetTemperature', value);
     }
 
-    protected async setTargetTemperature(value) {
+    protected async setTargetTemperature(value, attempt = 0) {
         const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
-        action.on('update', (state) => {
-            if (state === ExecutionState.FAILED && this.lastConfirmedTemperature !== undefined) {
-                this.warn('setTargetTemperature failed, reverting to', this.lastConfirmedTemperature);
-                this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
+        action.on('update', (state, event) => {
+            if (state === ExecutionState.FAILED) {
+                if (attempt < this.MAX_COMMAND_RETRIES && this.isRetryable(event?.failureType)) {
+                    const delay = Math.min(2 ** attempt * 1_000, 30_000);
+                    this.warn(`setTargetTemperature failed (${event.failureType}), retry ${attempt + 1}/${this.MAX_COMMAND_RETRIES} in ${delay / 1000}s`);
+                    setTimeout(() => {
+                        this.setTargetTemperature(value, attempt + 1).catch(e => this.error('setTargetTemperature retry failed:', e));
+                    }, delay);
+                } else if (this.lastConfirmedTemperature !== undefined) {
+                    this.warn('setTargetTemperature failed, reverting to', this.lastConfirmedTemperature);
+                    this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
+                }
             }
         });
     }
