@@ -16,6 +16,12 @@ const DEFAULT_RETRY_DELAY = 60;
 // interval cannot grow without bound.
 const MAX_RETRY_DELAY = 600;
 
+// Stand-in interval (in minutes) used when the user disables the periodic
+// full-state refresh with refreshPeriod: 0. overkiz-client cannot take 0
+// (0 || 30 === 30), so we hand it an interval so large it never fires in
+// practice (~10 years).
+const REFRESH_DISABLED_MINUTES = 5_000_000;
+
 // Process-wide error handlers must be installed only once, even if several
 // platform instances are configured (e.g. multiple TaHoma accounts), otherwise
 // each instance adds its own listener and Node warns about a leak.
@@ -69,6 +75,21 @@ export class Platform implements DynamicPlatformPlugin {
                 }
             },
         });
+
+        // The periodic full-state refresh (refreshPeriod) POSTs to Somfy's
+        // /setup/devices/states/refresh, a heavily rate-limited endpoint — too
+        // frequent and the cloud answers "429 QUOTA_EXCEEDED". It is only needed
+        // to catch changes made outside HomeKit on one-way RTS devices; io/cloud
+        // devices already stream their state through event polling.
+        // overkiz-client computes `(config.refreshPeriod || 30) * 60`, so a plain
+        // `0` cannot disable it (0 || 30 === 30). Translate an explicit 0 into an
+        // effectively-never interval so users with no RTS devices can opt out of
+        // the quota-prone refresh entirely.
+        if (config['refreshPeriod'] === 0) {
+            this.log.info('Refresh period set to 0: periodic full-state refresh disabled (state still updates via polling).');
+            config['refreshPeriod'] = REFRESH_DISABLED_MINUTES;
+        }
+
         this.client = new Client(logger, config);
 
         // When this event is fired it means Homebridge has restored all cached accessories from disk.
