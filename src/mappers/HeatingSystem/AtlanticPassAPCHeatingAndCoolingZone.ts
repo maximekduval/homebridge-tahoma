@@ -6,15 +6,17 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     protected THERMOSTAT_CHARACTERISTICS = ['prog'];
     protected MIN_TEMP = 16;
     protected MAX_TEMP = 30;
-    // Stable, complete set of valid modes. We deliberately do NOT narrow this at
-    // runtime: a reversible heat pump genuinely supports both HEAT and COOL over
-    // the year, and HomeKit caches validValues. If we shrank the set (e.g. to
-    // [HEAT, OFF] while the zone is off and getHeatingCooling() falls back to
-    // Heating), HomeKit could still hold a cached COOL value; the next "turn on"
-    // tap would write COOL, HAP would reject it as out-of-validValues BEFORE our
-    // onSet runs, and the accessory shows "No Response" with no log. Keeping every
-    // on-mode valid means any value HomeKit writes is accepted and then routed to
-    // the season-correct command by getHeatingCooling().
+    // Complete set published at startup. updateValidModes() narrows it at runtime
+    // to OFF + the active season (HEAT or COOL) so each zone tile only ever offers
+    // the mode the heat pump is actually in — BUT only when the season is known
+    // reliably (see getOperatingMode). When it is ambiguous we keep this full set.
+    //
+    // Why the full set is the safe fallback: HomeKit caches validValues. If we
+    // shrank on a guess (e.g. to [HEAT, OFF] while the zone is off and the season
+    // is really cooling), HomeKit could still hold a cached COOL value; the next
+    // "turn on" tap would write COOL, HAP would reject it as out-of-validValues
+    // BEFORE our onSet runs, and the accessory shows "No Response" with no log.
+    // Narrowing only on a reliable source removes that failure mode.
     protected TARGET_MODES = [
         Characteristics.TargetHeatingCoolingState.OFF,
         Characteristics.TargetHeatingCoolingState.HEAT,
@@ -82,6 +84,9 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             }
             return this.lastConfirmedTemperature ?? this.MIN_TEMP;
         });
+        // super published the full TARGET_MODES set; narrow it to the current
+        // season if we can read it reliably at startup.
+        this.updateValidModes();
         return service;
     }
 
@@ -119,9 +124,14 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         let targetTemperature;
         const heatingCooling = this.getHeatingCooling();
 
+        // Keep the offered modes in sync with the current season (OFF + the active
+        // mode when known, full set when ambiguous). Done before updating the
+        // value below so targetState.value (OFF or activeMode) always lands inside
+        // the published validValues. See updateValidModes.
+        this.updateValidModes();
+
         // Report HEAT/COOL (not AUTO) so HomeKit shows a meaningful label
-        // ("Chauffer"/"Refroidir"). validValues stays the stable TARGET_MODES set
-        // — we never narrow it at runtime (see TARGET_MODES for why).
+        // ("Chauffer"/"Refroidir").
         const activeMode = heatingCooling === 'Cooling'
             ? Characteristics.TargetHeatingCoolingState.COOL
             : Characteristics.TargetHeatingCoolingState.HEAT;
@@ -173,7 +183,20 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     /**
      * Helpers
      */
-    private getHeatingCooling(): 'Heating' | 'Cooling' {
+
+    /**
+     * Reliable heat-vs-cool season, or undefined when it cannot be trusted.
+     *
+     * A reversible heat pump's season is chosen by the main controller, never per
+     * zone. We only report a mode when it comes from a trustworthy source — the
+     * parent controller's operating mode, an unambiguous on/off state on the zone,
+     * or a device that physically exposes only one of the two commands. When the
+     * source is ambiguous we return undefined so callers don't guess: getHeatingCooling()
+     * falls back to Heating for command routing, but updateValidModes() keeps the
+     * full mode set instead of shrinking validValues to a guessed (possibly wrong)
+     * season — the root cause of the historical "No Response" bug.
+     */
+    private getOperatingMode(): 'Heating' | 'Cooling' | undefined {
         // Preferred source: the parent zone-control operating mode.
         const operatingMode = this.device.parent?.get('io:PassAPCOperatingModeState');
         if (operatingMode === 'cooling') {
@@ -184,7 +207,7 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         }
 
         // Parent state often unavailable (parent not mapped / not yet loaded).
-        // Infer from this zone's own on/off states before falling back.
+        // Infer from this zone's own on/off states before giving up.
         const coolingOn = this.device.get('core:CoolingOnOffState') === 'on';
         const heatingOn = this.device.get('core:HeatingOnOffState') === 'on';
         if (coolingOn && !heatingOn) {
@@ -194,15 +217,60 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             return 'Heating';
         }
 
-        // Last resort: prefer the mode the device actually exposes commands for.
-        if (this.device.hasCommand('setCoolingOnOffState') && !this.device.hasCommand('setHeatingOnOffState')) {
+        // Last resort: a device that physically exposes only one of the commands.
+        const canCool = this.device.hasCommand('setCoolingOnOffState');
+        const canHeat = this.device.hasCommand('setHeatingOnOffState');
+        if (canCool && !canHeat) {
             return 'Cooling';
+        }
+        if (canHeat && !canCool) {
+            return 'Heating';
+        }
+
+        // Genuinely ambiguous: let the caller decide what to do.
+        return undefined;
+    }
+
+    private getHeatingCooling(): 'Heating' | 'Cooling' {
+        const mode = this.getOperatingMode();
+        if (mode) {
+            return mode;
         }
         if (!this.warnedHeatingCoolingFallback) {
             this.warnedHeatingCoolingFallback = true;
-            this.warn(`getHeatingCooling: operating mode is "${operatingMode}" and zone states are ambiguous, defaulting to Heating`);
+            this.warn('getHeatingCooling: operating mode is unknown and zone states are ambiguous, defaulting to Heating');
         }
         return 'Heating';
+    }
+
+    /**
+     * Restrict the modes HomeKit offers on each zone tile to OFF + the single
+     * active season (HEAT or COOL) dictated by the main controller, so a zone can
+     * never be flipped to a season the heat pump isn't in.
+     *
+     * We only narrow when getOperatingMode() is reliable. When the season is
+     * unknown we keep the full [OFF, HEAT, COOL] set on purpose: shrinking on a
+     * guess is what made HomeKit cache a now-invalid value and reject the next
+     * write with "No Response" (HAP validates against validValues BEFORE onSet
+     * runs). See TARGET_MODES and getOperatingMode for the full rationale.
+     */
+    private updateValidModes() {
+        if (!this.targetState) {
+            return;
+        }
+        const C = Characteristics.TargetHeatingCoolingState;
+        const mode = this.getOperatingMode();
+        const validValues = mode === 'Cooling' ? [C.OFF, C.COOL]
+            : mode === 'Heating' ? [C.OFF, C.HEAT]
+                : [C.OFF, C.HEAT, C.COOL];
+
+        const current = this.targetState.props.validValues as number[] | undefined;
+        const unchanged = current !== undefined
+            && current.length === validValues.length
+            && validValues.every((v) => current.includes(v));
+        if (!unchanged) {
+            this.targetState.setProps({ validValues });
+        }
     }
 
     private getProfile() {

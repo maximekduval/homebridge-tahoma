@@ -139,17 +139,39 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         expect(zone.targetState.value).toBe(0); // TargetHeatingCoolingState.OFF
     });
 
-    it('never narrows validValues at runtime (avoids HAP rejecting the turn-on write)', () => {
-        // Regression: computeStates() used to call setProps({ validValues: [activeMode, OFF] }).
-        // While the zone was off, getHeatingCooling() fell back to Heating, shrinking
-        // validValues to [HEAT, OFF]. HomeKit still cached COOL, so the next "turn on"
-        // tap wrote COOL — rejected by HAP before onSet (No Response, no log).
+    it('keeps the full mode set when the season is ambiguous (avoids HAP rejecting the turn-on write)', () => {
+        // Regression: narrowing on a guess shrank validValues to the wrong season.
+        // While the zone is off with no parent / no commands, getOperatingMode() is
+        // undefined, so we must keep [OFF, HEAT, COOL] — otherwise HomeKit caches a
+        // now-invalid value and the next "turn on" tap is rejected by HAP before
+        // onSet (No Response, no log).
         const { zone } = makeZone({ states: { 'core:HeatingOnOffState': 'off' } });
         withCharacteristics(zone);
-        // Simulate registerMainService having published the stable, complete set.
         zone.targetState.setProps({ validValues: [0, 1, 2] }); // OFF, HEAT, COOL
         zone.computeStates();
         expect(zone.targetState.props.validValues).toEqual([0, 1, 2]);
+    });
+
+    it('narrows the offered modes to OFF + COOL when the controller is cooling', () => {
+        const { zone } = makeZone({
+            parentStates: { 'io:PassAPCOperatingModeState': 'cooling' },
+            states: { 'core:CoolingOnOffState': 'off' },
+        });
+        withCharacteristics(zone);
+        zone.targetState.setProps({ validValues: [0, 1, 2] });
+        zone.computeStates();
+        expect(zone.targetState.props.validValues).toEqual([0, 2]); // OFF, COOL
+    });
+
+    it('narrows the offered modes to OFF + HEAT when the controller is heating', () => {
+        const { zone } = makeZone({
+            parentStates: { 'io:PassAPCOperatingModeState': 'heating' },
+            states: { 'core:HeatingOnOffState': 'off' },
+        });
+        withCharacteristics(zone);
+        zone.targetState.setProps({ validValues: [0, 1, 2] });
+        zone.computeStates();
+        expect(zone.targetState.props.validValues).toEqual([0, 1]); // OFF, HEAT
     });
 
     it('reports HEAT and applies the confirmed target temperature when heating and idle', () => {
