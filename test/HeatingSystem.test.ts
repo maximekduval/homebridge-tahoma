@@ -139,6 +139,19 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         expect(zone.targetState.value).toBe(0); // TargetHeatingCoolingState.OFF
     });
 
+    it('never narrows validValues at runtime (avoids HAP rejecting the turn-on write)', () => {
+        // Regression: computeStates() used to call setProps({ validValues: [activeMode, OFF] }).
+        // While the zone was off, getHeatingCooling() fell back to Heating, shrinking
+        // validValues to [HEAT, OFF]. HomeKit still cached COOL, so the next "turn on"
+        // tap wrote COOL — rejected by HAP before onSet (No Response, no log).
+        const { zone } = makeZone({ states: { 'core:HeatingOnOffState': 'off' } });
+        withCharacteristics(zone);
+        // Simulate registerMainService having published the stable, complete set.
+        zone.targetState.setProps({ validValues: [0, 1, 2] }); // OFF, HEAT, COOL
+        zone.computeStates();
+        expect(zone.targetState.props.validValues).toEqual([0, 1, 2]);
+    });
+
     it('reports HEAT and applies the confirmed target temperature when heating and idle', () => {
         const { zone } = makeZone({
             states: {

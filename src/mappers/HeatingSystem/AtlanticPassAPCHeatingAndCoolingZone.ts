@@ -6,11 +6,19 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     protected THERMOSTAT_CHARACTERISTICS = ['prog'];
     protected MIN_TEMP = 16;
     protected MAX_TEMP = 30;
+    // Stable, complete set of valid modes. We deliberately do NOT narrow this at
+    // runtime: a reversible heat pump genuinely supports both HEAT and COOL over
+    // the year, and HomeKit caches validValues. If we shrank the set (e.g. to
+    // [HEAT, OFF] while the zone is off and getHeatingCooling() falls back to
+    // Heating), HomeKit could still hold a cached COOL value; the next "turn on"
+    // tap would write COOL, HAP would reject it as out-of-validValues BEFORE our
+    // onSet runs, and the accessory shows "No Response" with no log. Keeping every
+    // on-mode valid means any value HomeKit writes is accepted and then routed to
+    // the season-correct command by getHeatingCooling().
     protected TARGET_MODES = [
-        // Placeholder — overridden dynamically in computeStates() once the
-        // operating mode (Heating / Cooling) is known.
-        Characteristics.TargetHeatingCoolingState.HEAT,
         Characteristics.TargetHeatingCoolingState.OFF,
+        Characteristics.TargetHeatingCoolingState.HEAT,
+        Characteristics.TargetHeatingCoolingState.COOL,
     ];
 
     private warnedHeatingCoolingFallback = false;
@@ -111,15 +119,12 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         let targetTemperature;
         const heatingCooling = this.getHeatingCooling();
 
-        // Use HEAT/COOL instead of AUTO so HomeKit shows a meaningful label
-        // ("Chauffer"/"Refroidir" vs "Automatique") and enables single-tap toggle.
+        // Report HEAT/COOL (not AUTO) so HomeKit shows a meaningful label
+        // ("Chauffer"/"Refroidir"). validValues stays the stable TARGET_MODES set
+        // — we never narrow it at runtime (see TARGET_MODES for why).
         const activeMode = heatingCooling === 'Cooling'
             ? Characteristics.TargetHeatingCoolingState.COOL
             : Characteristics.TargetHeatingCoolingState.HEAT;
-
-        // Keep valid modes in sync with the current operating mode so that the
-        // characteristic always shows exactly two choices: active or off.
-        this.targetState?.setProps({ validValues: [activeMode, Characteristics.TargetHeatingCoolingState.OFF] });
 
         if (this.device.get(`core:${heatingCooling}OnOffState`) === 'off') {
             targetState = Characteristics.TargetHeatingCoolingState.OFF;
