@@ -6,16 +6,20 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     protected THERMOSTAT_CHARACTERISTICS = ['prog'];
     protected MIN_TEMP = 16;
     protected MAX_TEMP = 30;
-    // Complete set published at startup and whenever the zone is off.
-    // updateValidModes() narrows it to OFF + the active season (HEAT or COOL) only
-    // while the zone is ON and the season is known reliably, so a running zone tile
-    // can't be flipped to the wrong season.
+    // STATIC, complete set — published once at startup and never changed at runtime.
     //
-    // Why the full set must stay while off: HomeKit validates a write against
-    // validValues BEFORE our onSet runs. Turning a zone back on from off makes
-    // HomeKit write an on-mode; if that mode isn't in the set, HAP rejects it and
-    // the accessory shows "No Response" with no log. The full set is the known-good
-    // set for that activation path, so we keep it whenever the zone is off.
+    // We deliberately do NOT narrow this to the active season, even though a zone
+    // can only be in the season the main controller dictates. Two HomeKit facts make
+    // dynamic narrowing unworkable:
+    //  1. iOS caches characteristic metadata (validValues) and only re-reads it when
+    //     the accessory's configuration number changes. setProps() at runtime is not
+    //     reliably picked up, and once iOS has cached a narrowed set, reverting the
+    //     plugin doesn't clear it (needs a Home-hub restart / re-pair).
+    //  2. HAP validates a write against validValues BEFORE onSet runs. Turning a zone
+    //     on from off makes iOS write HEAT by default (regardless of our set); if HEAT
+    //     isn't valid, HAP rejects it → "No Response" with no log.
+    // So we keep every on-mode valid. Picking the "wrong" mode is harmless: getTargetStateCommands()
+    // routes the command to the controller's real season via getHeatingCooling().
     protected TARGET_MODES = [
         Characteristics.TargetHeatingCoolingState.OFF,
         Characteristics.TargetHeatingCoolingState.HEAT,
@@ -83,9 +87,6 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             }
             return this.lastConfirmedTemperature ?? this.MIN_TEMP;
         });
-        // super published the full TARGET_MODES set; narrow it to the current
-        // season if we can read it reliably at startup.
-        this.updateValidModes();
         return service;
     }
 
@@ -123,14 +124,9 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         let targetTemperature;
         const heatingCooling = this.getHeatingCooling();
 
-        // Keep the offered modes in sync with the current season (OFF + the active
-        // mode when known, full set when ambiguous). Done before updating the
-        // value below so targetState.value (OFF or activeMode) always lands inside
-        // the published validValues. See updateValidModes.
-        this.updateValidModes();
-
         // Report HEAT/COOL (not AUTO) so HomeKit shows a meaningful label
-        // ("Chauffer"/"Refroidir").
+        // ("Chauffer"/"Refroidir"). validValues stays the static TARGET_MODES set —
+        // see TARGET_MODES for why we never narrow it at runtime.
         const activeMode = heatingCooling === 'Cooling'
             ? Characteristics.TargetHeatingCoolingState.COOL
             : Characteristics.TargetHeatingCoolingState.HEAT;
@@ -190,10 +186,8 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
      * zone. We only report a mode when it comes from a trustworthy source — the
      * parent controller's operating mode, an unambiguous on/off state on the zone,
      * or a device that physically exposes only one of the two commands. When the
-     * source is ambiguous we return undefined so callers don't guess: getHeatingCooling()
-     * falls back to Heating for command routing, but updateValidModes() keeps the
-     * full mode set instead of shrinking validValues to a guessed (possibly wrong)
-     * season — the root cause of the historical "No Response" bug.
+     * source is ambiguous getHeatingCooling() falls back to Heating for command
+     * routing.
      */
     private getOperatingMode(): 'Heating' | 'Cooling' | undefined {
         // Preferred source: the parent zone-control operating mode.
@@ -240,40 +234,6 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
             this.warn('getHeatingCooling: operating mode is unknown and zone states are ambiguous, defaulting to Heating');
         }
         return 'Heating';
-    }
-
-    /**
-     * Restrict the modes HomeKit offers on a *running* zone tile to OFF + the
-     * single active season (HEAT or COOL) dictated by the main controller, so a
-     * zone that is on can't be flipped to a season the heat pump isn't in.
-     *
-     * Two hard rules keep this from reintroducing the "No Response" bug (HAP
-     * validates a write against validValues BEFORE onSet runs):
-     *  1. Only narrow when getOperatingMode() is reliable — never on a guess.
-     *  2. Only narrow while the zone is actually ON. When it is off we publish the
-     *     full [OFF, HEAT, COOL] set, because turning a zone back on from off makes
-     *     HomeKit write an on-mode and that write must always be accepted. (This is
-     *     the known-good set: activation from off has always worked with it.)
-     * Either condition unmet → full set. See TARGET_MODES and getOperatingMode.
-     */
-    private updateValidModes() {
-        if (!this.targetState) {
-            return;
-        }
-        const C = Characteristics.TargetHeatingCoolingState;
-        const mode = this.getOperatingMode();
-        const isOn = mode !== undefined && this.device.get(`core:${mode}OnOffState`) === 'on';
-        const validValues = !isOn ? [C.OFF, C.HEAT, C.COOL]
-            : mode === 'Cooling' ? [C.OFF, C.COOL]
-                : [C.OFF, C.HEAT];
-
-        const current = this.targetState.props.validValues as number[] | undefined;
-        const unchanged = current !== undefined
-            && current.length === validValues.length
-            && validValues.every((v) => current.includes(v));
-        if (!unchanged) {
-            this.targetState.setProps({ validValues });
-        }
     }
 
     private getProfile() {

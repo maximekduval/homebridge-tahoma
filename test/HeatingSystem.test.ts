@@ -139,53 +139,24 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         expect(zone.targetState.value).toBe(0); // TargetHeatingCoolingState.OFF
     });
 
-    it('keeps the full mode set when the season is ambiguous (avoids HAP rejecting the turn-on write)', () => {
-        // Regression: narrowing on a guess shrank validValues to the wrong season.
-        // While the zone is off with no parent / no commands, getOperatingMode() is
-        // undefined, so we must keep [OFF, HEAT, COOL] — otherwise HomeKit caches a
-        // now-invalid value and the next "turn on" tap is rejected by HAP before
-        // onSet (No Response, no log).
-        const { zone } = makeZone({ states: { 'core:HeatingOnOffState': 'off' } });
-        withCharacteristics(zone);
-        zone.targetState.setProps({ validValues: [0, 1, 2] }); // OFF, HEAT, COOL
-        zone.computeStates();
-        expect(zone.targetState.props.validValues).toEqual([0, 1, 2]);
-    });
-
-    it('narrows the offered modes to OFF + COOL when cooling AND running', () => {
-        const { zone } = makeZone({
-            parentStates: { 'io:PassAPCOperatingModeState': 'cooling' },
-            states: { 'core:CoolingOnOffState': 'on' },
-        });
-        withCharacteristics(zone);
-        zone.targetState.setProps({ validValues: [0, 1, 2] });
-        zone.computeStates();
-        expect(zone.targetState.props.validValues).toEqual([0, 2]); // OFF, COOL
-    });
-
-    it('narrows the offered modes to OFF + HEAT when heating AND running', () => {
-        const { zone } = makeZone({
-            parentStates: { 'io:PassAPCOperatingModeState': 'heating' },
-            states: { 'core:HeatingOnOffState': 'on' },
-        });
-        withCharacteristics(zone);
-        zone.targetState.setProps({ validValues: [0, 1, 2] });
-        zone.computeStates();
-        expect(zone.targetState.props.validValues).toEqual([0, 1]); // OFF, HEAT
-    });
-
-    it('keeps the full set while the zone is OFF even when the season is known (activation from off must work)', () => {
-        // Regression of the "No Response when tapping the number to activate" bug:
-        // narrowing while off made HomeKit's turn-on write fall outside validValues,
-        // rejected by HAP before onSet. While off we must publish [OFF, HEAT, COOL].
-        const { zone } = makeZone({
-            parentStates: { 'io:PassAPCOperatingModeState': 'heating' },
-            states: { 'core:HeatingOnOffState': 'off' },
-        });
-        withCharacteristics(zone);
-        zone.targetState.setProps({ validValues: [0, 1] }); // pretend a stale narrowed set
-        zone.computeStates();
-        expect(zone.targetState.props.validValues).toEqual([0, 1, 2]); // OFF, HEAT, COOL
+    it('never narrows validValues at runtime, even when the season is known and the zone is running', () => {
+        // Dynamic validValues changes are unreliable in HomeKit: iOS caches the set
+        // and only re-reads on a config-number change, and HAP rejects a turn-on
+        // write that falls outside the cached set (No Response). So the set stays
+        // the static, complete TARGET_MODES in every season/on-off combination.
+        // computeStates() must not touch validValues.
+        const cases = [
+            { parentStates: { 'io:PassAPCOperatingModeState': 'cooling' }, states: { 'core:CoolingOnOffState': 'on' } },
+            { parentStates: { 'io:PassAPCOperatingModeState': 'heating' }, states: { 'core:HeatingOnOffState': 'on' } },
+            { states: { 'core:HeatingOnOffState': 'off' } },
+        ];
+        for (const deviceOpts of cases) {
+            const { zone } = makeZone(deviceOpts);
+            withCharacteristics(zone);
+            zone.targetState.setProps({ validValues: [0, 1, 2] }); // OFF, HEAT, COOL
+            zone.computeStates();
+            expect(zone.targetState.props.validValues).toEqual([0, 1, 2]);
+        }
     });
 
     it('reports HEAT and applies the confirmed target temperature when heating and idle', () => {
