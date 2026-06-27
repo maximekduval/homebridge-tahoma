@@ -6,17 +6,16 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     protected THERMOSTAT_CHARACTERISTICS = ['prog'];
     protected MIN_TEMP = 16;
     protected MAX_TEMP = 30;
-    // Complete set published at startup. updateValidModes() narrows it at runtime
-    // to OFF + the active season (HEAT or COOL) so each zone tile only ever offers
-    // the mode the heat pump is actually in — BUT only when the season is known
-    // reliably (see getOperatingMode). When it is ambiguous we keep this full set.
+    // Complete set published at startup and whenever the zone is off.
+    // updateValidModes() narrows it to OFF + the active season (HEAT or COOL) only
+    // while the zone is ON and the season is known reliably, so a running zone tile
+    // can't be flipped to the wrong season.
     //
-    // Why the full set is the safe fallback: HomeKit caches validValues. If we
-    // shrank on a guess (e.g. to [HEAT, OFF] while the zone is off and the season
-    // is really cooling), HomeKit could still hold a cached COOL value; the next
-    // "turn on" tap would write COOL, HAP would reject it as out-of-validValues
-    // BEFORE our onSet runs, and the accessory shows "No Response" with no log.
-    // Narrowing only on a reliable source removes that failure mode.
+    // Why the full set must stay while off: HomeKit validates a write against
+    // validValues BEFORE our onSet runs. Turning a zone back on from off makes
+    // HomeKit write an on-mode; if that mode isn't in the set, HAP rejects it and
+    // the accessory shows "No Response" with no log. The full set is the known-good
+    // set for that activation path, so we keep it whenever the zone is off.
     protected TARGET_MODES = [
         Characteristics.TargetHeatingCoolingState.OFF,
         Characteristics.TargetHeatingCoolingState.HEAT,
@@ -244,15 +243,18 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     }
 
     /**
-     * Restrict the modes HomeKit offers on each zone tile to OFF + the single
-     * active season (HEAT or COOL) dictated by the main controller, so a zone can
-     * never be flipped to a season the heat pump isn't in.
+     * Restrict the modes HomeKit offers on a *running* zone tile to OFF + the
+     * single active season (HEAT or COOL) dictated by the main controller, so a
+     * zone that is on can't be flipped to a season the heat pump isn't in.
      *
-     * We only narrow when getOperatingMode() is reliable. When the season is
-     * unknown we keep the full [OFF, HEAT, COOL] set on purpose: shrinking on a
-     * guess is what made HomeKit cache a now-invalid value and reject the next
-     * write with "No Response" (HAP validates against validValues BEFORE onSet
-     * runs). See TARGET_MODES and getOperatingMode for the full rationale.
+     * Two hard rules keep this from reintroducing the "No Response" bug (HAP
+     * validates a write against validValues BEFORE onSet runs):
+     *  1. Only narrow when getOperatingMode() is reliable — never on a guess.
+     *  2. Only narrow while the zone is actually ON. When it is off we publish the
+     *     full [OFF, HEAT, COOL] set, because turning a zone back on from off makes
+     *     HomeKit write an on-mode and that write must always be accepted. (This is
+     *     the known-good set: activation from off has always worked with it.)
+     * Either condition unmet → full set. See TARGET_MODES and getOperatingMode.
      */
     private updateValidModes() {
         if (!this.targetState) {
@@ -260,9 +262,10 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         }
         const C = Characteristics.TargetHeatingCoolingState;
         const mode = this.getOperatingMode();
-        const validValues = mode === 'Cooling' ? [C.OFF, C.COOL]
-            : mode === 'Heating' ? [C.OFF, C.HEAT]
-                : [C.OFF, C.HEAT, C.COOL];
+        const isOn = mode !== undefined && this.device.get(`core:${mode}OnOffState`) === 'on';
+        const validValues = !isOn ? [C.OFF, C.HEAT, C.COOL]
+            : mode === 'Cooling' ? [C.OFF, C.COOL]
+                : [C.OFF, C.HEAT];
 
         const current = this.targetState.props.validValues as number[] | undefined;
         const unchanged = current !== undefined

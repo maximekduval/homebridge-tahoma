@@ -152,10 +152,10 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         expect(zone.targetState.props.validValues).toEqual([0, 1, 2]);
     });
 
-    it('narrows the offered modes to OFF + COOL when the controller is cooling', () => {
+    it('narrows the offered modes to OFF + COOL when cooling AND running', () => {
         const { zone } = makeZone({
             parentStates: { 'io:PassAPCOperatingModeState': 'cooling' },
-            states: { 'core:CoolingOnOffState': 'off' },
+            states: { 'core:CoolingOnOffState': 'on' },
         });
         withCharacteristics(zone);
         zone.targetState.setProps({ validValues: [0, 1, 2] });
@@ -163,15 +163,29 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         expect(zone.targetState.props.validValues).toEqual([0, 2]); // OFF, COOL
     });
 
-    it('narrows the offered modes to OFF + HEAT when the controller is heating', () => {
+    it('narrows the offered modes to OFF + HEAT when heating AND running', () => {
         const { zone } = makeZone({
             parentStates: { 'io:PassAPCOperatingModeState': 'heating' },
-            states: { 'core:HeatingOnOffState': 'off' },
+            states: { 'core:HeatingOnOffState': 'on' },
         });
         withCharacteristics(zone);
         zone.targetState.setProps({ validValues: [0, 1, 2] });
         zone.computeStates();
         expect(zone.targetState.props.validValues).toEqual([0, 1]); // OFF, HEAT
+    });
+
+    it('keeps the full set while the zone is OFF even when the season is known (activation from off must work)', () => {
+        // Regression of the "No Response when tapping the number to activate" bug:
+        // narrowing while off made HomeKit's turn-on write fall outside validValues,
+        // rejected by HAP before onSet. While off we must publish [OFF, HEAT, COOL].
+        const { zone } = makeZone({
+            parentStates: { 'io:PassAPCOperatingModeState': 'heating' },
+            states: { 'core:HeatingOnOffState': 'off' },
+        });
+        withCharacteristics(zone);
+        zone.targetState.setProps({ validValues: [0, 1] }); // pretend a stale narrowed set
+        zone.computeStates();
+        expect(zone.targetState.props.validValues).toEqual([0, 1, 2]); // OFF, HEAT, COOL
     });
 
     it('reports HEAT and applies the confirmed target temperature when heating and idle', () => {
