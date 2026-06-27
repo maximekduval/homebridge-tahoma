@@ -180,41 +180,50 @@ export default abstract class Mapper {
             action.setMaxListeners(0);
             this.actionPromise.action = action;
             let settled = false;
-            // Some devices (e.g. AtlanticPassAPC zones) emit NOT_TRANSMITTED as an
-            // intermediate step before COMPLETED or FAILED. Delay settling so we don't
-            // prematurely release the in-flight guard and let stale echoes overwrite the UI.
-            let notTransmittedTimer: ReturnType<typeof setTimeout> | null = null;
+            // Safety net: if the gateway connection drops mid-execution and no
+            // terminal event ever arrives, release the in-flight guard so the
+            // mapper can re-sync instead of being stuck "busy" forever. The
+            // overkiz-client EXEC_TIMEOUT also emits TIMED_OUT eventually, so
+            // this is belt-and-suspenders.
+            let safetyTimer: ReturnType<typeof setTimeout> | null = null;
             action.on('update', (state, event) => {
+                // Overkiz marks a truly final transition with timeToNextState === -1.
+                // NOT_TRANSMITTED is NOT a failure: it is an intermediate step of the
+                // lifecycle (INITIALIZED → NOT_TRANSMITTED → TRANSMITTED → IN_PROGRESS
+                // → COMPLETED/FAILED) meaning "not yet transmitted to the device". It
+                // is emitted on almost every command and is usually followed by
+                // COMPLETED, so we log it at debug — not warn.
+                const terminal = this.isTerminalState(state) || event?.timeToNextState === -1;
+
                 if (state === ExecutionState.FAILED) {
                     this.error(commandName, event?.failureType);
                 } else if (state === ExecutionState.COMPLETED) {
                     this.info(commandName, state);
-                } else if (state === ExecutionState.TIMED_OUT || state === ExecutionState.NOT_TRANSMITTED) {
+                } else if (state === ExecutionState.TIMED_OUT) {
                     this.warn(commandName, state);
                 } else {
+                    // INITIALIZED / NOT_TRANSMITTED / TRANSMITTED / IN_PROGRESS — transient.
                     this.debug(commandName, state);
                 }
-                if (!settled) {
-                    if (state === ExecutionState.NOT_TRANSMITTED) {
-                        // NOT_TRANSMITTED may be followed by COMPLETED/FAILED within seconds.
-                        // Use a fallback timer: if no real terminal state arrives, settle then.
-                        if (notTransmittedTimer === null) {
-                            notTransmittedTimer = setTimeout(() => {
-                                if (!settled) {
-                                    settled = true;
-                                    this.inFlight = Math.max(0, this.inFlight - 1);
-                                    this.debug(commandName, 'NOT_TRANSMITTED — no further event from gateway, marking as terminal');
-                                }
-                            }, 30_000);
-                        }
-                    } else if (this.isTerminalState(state)) {
-                        if (notTransmittedTimer !== null) {
-                            clearTimeout(notTransmittedTimer);
-                            notTransmittedTimer = null;
-                        }
-                        settled = true;
-                        this.inFlight = Math.max(0, this.inFlight - 1);
+
+                if (settled) {
+                    return;
+                }
+                if (terminal) {
+                    if (safetyTimer !== null) {
+                        clearTimeout(safetyTimer);
+                        safetyTimer = null;
                     }
+                    settled = true;
+                    this.inFlight = Math.max(0, this.inFlight - 1);
+                } else if (safetyTimer === null) {
+                    safetyTimer = setTimeout(() => {
+                        if (!settled) {
+                            settled = true;
+                            this.inFlight = Math.max(0, this.inFlight - 1);
+                            this.debug(commandName, 'no terminal event from gateway, releasing in-flight guard');
+                        }
+                    }, 60_000);
                 }
             });
         }
@@ -222,7 +231,8 @@ export default abstract class Mapper {
     }
 
     private isTerminalState(state): boolean {
-        // NOT_TRANSMITTED is handled separately with a delayed fallback timer.
+        // NOT_TRANSMITTED is intentionally absent: it is a transient lifecycle
+        // step, not a terminal state (see the 'update' handler in executeCommands).
         return state === ExecutionState.COMPLETED ||
             state === ExecutionState.FAILED ||
             state === ExecutionState.TIMED_OUT;

@@ -189,3 +189,65 @@ describe('Mapper.isIdle — in-flight tracking (C2)', () => {
         expect(mapper.isIdle).toBe(true);
     });
 });
+
+describe('Mapper.executeCommands — NOT_TRANSMITTED is transient', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('does not settle on NOT_TRANSMITTED and does not warn about it', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+
+        // NOT_TRANSMITTED is an intermediate lifecycle step, not a terminal:
+        // the mapper must stay busy and must NOT log it as a warning.
+        action.emit('update', ExecutionState.NOT_TRANSMITTED, { timeToNextState: 5000 });
+        expect(mapper.isIdle).toBe(false);
+        expect(platform.log.warn).not.toHaveBeenCalled();
+    });
+
+    it('settles when COMPLETED follows a NOT_TRANSMITTED', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+
+        action.emit('update', ExecutionState.NOT_TRANSMITTED, { timeToNextState: 5000 });
+        action.emit('update', ExecutionState.COMPLETED, { timeToNextState: -1 });
+        expect(mapper.isIdle).toBe(true);
+    });
+
+    it('settles on the authoritative terminal signal timeToNextState === -1', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+
+        // Even a NOT_TRANSMITTED that the gateway marks final (-1) releases the guard.
+        action.emit('update', ExecutionState.NOT_TRANSMITTED, { timeToNextState: -1 });
+        expect(mapper.isIdle).toBe(true);
+    });
+
+    it('releases the in-flight guard via the safety net if no terminal ever arrives', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+
+        action.emit('update', ExecutionState.NOT_TRANSMITTED, { timeToNextState: 5000 });
+        expect(mapper.isIdle).toBe(false);
+
+        // Gateway connection dropped, no terminal event: the 60s safety timer frees it.
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(mapper.isIdle).toBe(true);
+    });
+});
