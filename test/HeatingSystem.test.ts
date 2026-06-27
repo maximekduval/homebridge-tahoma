@@ -216,6 +216,25 @@ describe('HeatingSystem (base) commands', () => {
     });
 });
 
+describe('HeatingSystem.isRetryable', () => {
+    it('retries transient transport failures', () => {
+        const { mapper } = makeHeating();
+        expect(mapper.isRetryable('DATA_TRANSPORT_SERVICE_ERROR')).toBe(true);
+        expect(mapper.isRetryable('DATA_TRANSPORT_SERVICE_ABORTED_BY_RECIPIENT')).toBe(true);
+    });
+
+    it('retries DEVICE_DEFECT (device not ready, e.g. just switched on from off)', () => {
+        const { mapper } = makeHeating();
+        expect(mapper.isRetryable('DEVICE_DEFECT')).toBe(true);
+    });
+
+    it('does not retry unknown / permanent failures or a missing failure type', () => {
+        const { mapper } = makeHeating();
+        expect(mapper.isRetryable('CANCELLED')).toBe(false);
+        expect(mapper.isRetryable(undefined)).toBe(false);
+    });
+});
+
 describe('HeatingSystem (base) onStateChanged', () => {
     it('converts a Kelvin temperature to Celsius', () => {
         const { mapper } = makeHeating();

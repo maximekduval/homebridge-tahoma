@@ -117,10 +117,19 @@ export default class HeatingSystem extends Mapper {
 
     protected readonly MAX_COMMAND_RETRIES = 5;
 
-    // Failure types that are transient (gateway/transport glitch) and worth retrying.
+    // Failure types that are transient (gateway/transport glitch, or a device
+    // that is momentarily not ready) and worth retrying with backoff.
+    //
+    // DEVICE_DEFECT is included because it is the failure an Atlantic PAC reports
+    // when a command lands while the unit is still coming online — e.g. asking
+    // for a target temperature (or even the on/off itself) right after switching
+    // a cold/off zone on. The backoff (1→2→4→8→16s) gives the unit time to
+    // finish starting; if it is genuinely defective we still give up after
+    // MAX_COMMAND_RETRIES and revert the UI cleanly.
     protected isRetryable(failureType?: string): boolean {
         return failureType === 'DATA_TRANSPORT_SERVICE_ERROR' ||
-               failureType === 'DATA_TRANSPORT_SERVICE_ABORTED_BY_RECIPIENT';
+               failureType === 'DATA_TRANSPORT_SERVICE_ABORTED_BY_RECIPIENT' ||
+               failureType === 'DEVICE_DEFECT';
     }
 
     protected async setTargetState(value, attempt = 0) {
