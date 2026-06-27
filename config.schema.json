@@ -95,9 +95,9 @@
       "refreshPeriod": {
         "title": "Refresh period",
         "type": "number",
-        "minimum": 10,
+        "minimum": 0,
         "placeholder": 30,
-        "description": "Period (in minutes) for refreshing device changes made locally (with remote control for eg.)"
+        "description": "Period (in minutes) for the full-state refresh that catches changes made locally on one-way RTS devices (e.g. a physical remote). io/cloud devices already update in real time via the Polling period, so this can be raised a lot. If you see repeated '429 QUOTA_EXCEEDED' errors, increase this (e.g. 120+) or set it to 0 to disable it entirely."
       },
       "exposeScenarios": {
         "title": "Expose scenarios",
