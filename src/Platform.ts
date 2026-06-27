@@ -16,11 +16,29 @@ const DEFAULT_RETRY_DELAY = 60;
 // interval cannot grow without bound.
 const MAX_RETRY_DELAY = 600;
 
-// Stand-in interval (in minutes) used when the user disables the periodic
-// full-state refresh with refreshPeriod: 0. overkiz-client cannot take 0
-// (0 || 30 === 30), so we hand it an interval so large it never fires in
-// practice (~10 years).
-const REFRESH_DISABLED_MINUTES = 5_000_000;
+// Sentinel handed to overkiz-client to disable the periodic full-state refresh
+// when the user sets refreshPeriod: 0.
+//
+// overkiz cannot take a plain 0 (it computes `(config.refreshPeriod || 30)`, so
+// 0 falls back to 30). A huge *positive* value is actively dangerous: overkiz
+// feeds `minutes * 60 * 1000` to setInterval, and Node clamps any delay above
+// its 32-bit limit (2_147_483_647 ms ≈ 24.8 days) down to 1 ms — firing the
+// refresh ~1000×/s and instantly exhausting Somfy's quota (the old
+// REFRESH_DISABLED_MINUTES = 5_000_000 did exactly this).
+//
+// A negative value sidesteps both traps: overkiz computes a non-positive period
+// and its setRefreshTaskPeriod only arms an interval when `period > 0`, so the
+// refresh task is never scheduled at all — truly disabled, no overflow.
+const REFRESH_DISABLED_SENTINEL = -1;
+
+/**
+ * Translate the user-facing `refreshPeriod` (0 = disable the periodic full-state
+ * refresh) into the value handed to overkiz-client. Any non-zero value is passed
+ * through untouched; an explicit 0 becomes the disable sentinel.
+ */
+export function resolveRefreshPeriod(value: unknown): unknown {
+    return value === 0 ? REFRESH_DISABLED_SENTINEL : value;
+}
 
 // Process-wide error handlers must be installed only once, even if several
 // platform instances are configured (e.g. multiple TaHoma accounts), otherwise
@@ -80,15 +98,13 @@ export class Platform implements DynamicPlatformPlugin {
         // /setup/devices/states/refresh, a heavily rate-limited endpoint — too
         // frequent and the cloud answers "429 QUOTA_EXCEEDED". It is only needed
         // to catch changes made outside HomeKit on one-way RTS devices; io/cloud
-        // devices already stream their state through event polling.
-        // overkiz-client computes `(config.refreshPeriod || 30) * 60`, so a plain
-        // `0` cannot disable it (0 || 30 === 30). Translate an explicit 0 into an
-        // effectively-never interval so users with no RTS devices can opt out of
-        // the quota-prone refresh entirely.
+        // devices already stream their state through event polling. Let users with
+        // no RTS devices opt out entirely with refreshPeriod: 0 (see
+        // resolveRefreshPeriod for why a plain 0 cannot reach overkiz unchanged).
         if (config['refreshPeriod'] === 0) {
             this.log.info('Refresh period set to 0: periodic full-state refresh disabled (state still updates via polling).');
-            config['refreshPeriod'] = REFRESH_DISABLED_MINUTES;
         }
+        config['refreshPeriod'] = resolveRefreshPeriod(config['refreshPeriod']);
 
         this.client = new Client(logger, config);
 
