@@ -28,24 +28,6 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
         super.applyConfig(config);
     }
 
-    protected async setTargetState(value, attempt = 0) {
-        // When turning a zone on from off, iOS Home defaults the written mode to
-        // HEAT (the first non-off TargetHeatingCoolingState), regardless of the
-        // heat pump's actual season. The command is routed to the right season by
-        // getTargetStateCommands(), but the tile would otherwise flash "heating"
-        // until the server round-trip lets computeStates() correct it. Snap the UI
-        // to the real season immediately so there's no visible wrong-mode flash.
-        if (value !== Characteristics.TargetHeatingCoolingState.OFF) {
-            const seasonMode = this.getHeatingCooling() === 'Cooling'
-                ? Characteristics.TargetHeatingCoolingState.COOL
-                : Characteristics.TargetHeatingCoolingState.HEAT;
-            if (value !== seasonMode) {
-                this.targetState?.updateValue(seasonMode);
-            }
-        }
-        return super.setTargetState(value, attempt);
-    }
-
     protected getTargetStateCommands(value): Command | Array<Command> {
         const heatingCooling = this.getHeatingCooling();
         const commands: Array<Command> = [];
