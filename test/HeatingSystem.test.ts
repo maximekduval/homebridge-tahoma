@@ -233,6 +233,27 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
     });
 });
 
+describe('AtlanticPassAPCHeatingAndCoolingZone.setTargetState', () => {
+    it('snaps the UI to the real season instead of flashing the iOS default (HEAT) when activating in cooling', async () => {
+        const { zone } = makeZone({
+            parentStates: { 'io:PassAPCOperatingModeState': 'cooling' },
+            states: { 'core:CoolingOnOffState': 'off' },
+        });
+        zone.targetState = new FakeCharacteristic('TargetHeatingCoolingState', 0); // OFF
+        zone.executeCommands = vi.fn().mockResolvedValue({ on: vi.fn() });
+        await zone.setTargetState(1); // iOS writes HEAT to turn on from off
+        expect(zone.targetState.value).toBe(2); // COOL — corrected immediately
+    });
+
+    it('leaves OFF writes untouched', async () => {
+        const { zone } = makeZone({ parentStates: { 'io:PassAPCOperatingModeState': 'cooling' } });
+        zone.targetState = new FakeCharacteristic('TargetHeatingCoolingState', 2); // COOL
+        zone.executeCommands = vi.fn().mockResolvedValue({ on: vi.fn() });
+        await zone.setTargetState(0); // OFF
+        expect(zone.targetState.value).toBe(2); // unchanged by the snap logic
+    });
+});
+
 describe('HeatingSystem (base) commands', () => {
     it('maps target states to mode commands', () => {
         const { mapper } = makeHeating();
