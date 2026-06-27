@@ -1,6 +1,22 @@
-# Overkiz (Somfy) - Homebridge-TaHoma
+<p align="center">
+<img src="https://github.com/homebridge/branding/raw/master/logos/homebridge-wordmark-logo-vertical.png" width="150">
+</p>
 
-Homebridge plugin supporting Overkiz based platforms :
+# Homebridge TaHoma MK (Overkiz / Somfy)
+
+[![npm](https://img.shields.io/npm/v/homebridge-tahoma-mk.svg)](https://www.npmjs.com/package/homebridge-tahoma-mk)
+
+## About plugin
+Homebridge plugin for Overkiz-based platforms (Somfy TaHoma / Connexoon, Cozytouch, Hi Kumo, Flexom, Rexel…), exposing your devices in Apple HomeKit.
+
+This is a personal fork of [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma) (Apache-2.0), published on npm as **`homebridge-tahoma-mk`**. It adds stability fixes on top of upstream, mainly:
+- handles Somfy's `QUOTA_EXCEEDED` (429) rate limiting — the refresh period can be raised or disabled (`refreshPeriod: 0`);
+- treats `NOT_TRANSMITTED` as a transient state (no more false warnings) and retries transient `DEVICE_DEFECT` failures with backoff;
+- fixes commands lost when changing temperature and mode together;
+- fixes the plugin name so accessories aren't re-created on every restart;
+- robustness fixes around the Atlantic heat-pump heating/cooling zones.
+
+Supported Overkiz services:
 
 | Service code				| Vendor					| Product compatibility												|
 |---------------------------|---------------------------|-------------------------------------------------------------------|
@@ -17,7 +33,7 @@ Homebridge plugin supporting Overkiz based platforms :
 # Installation
 
 1. Install homebridge using: `npm install -g homebridge`
-2. Install this plugin using: `npm install -g homebridge-tahoma`
+2. Install this plugin using: `npm install -g homebridge-tahoma-mk`
 3. Update your configuration file. See bellow for a sample.
 
 # Configuration
@@ -161,6 +177,8 @@ Full configuration example:
 
 # Contribute
 
-You are welcome to contribute to this plugin development by opening an issue in case of unexpected behaviour or unsupported device.
+You are welcome to contribute by opening an issue on this fork in case of unexpected behaviour or unsupported device: [github.com/maximekduval/homebridge-tahoma/issues](https://github.com/maximekduval/homebridge-tahoma/issues).
 
-I do not expect any reward concerning this plugin, however, some users ask me for a [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=L4X489MG7FUCN) button as sign of contribution. Feel free to use it.
+# Credits
+
+Forked from [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma) by Romain Duboc. All credit for the original plugin goes to the upstream author. Licensed under Apache-2.0.
