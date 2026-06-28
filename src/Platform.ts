@@ -40,6 +40,21 @@ export function resolveRefreshPeriod(value: unknown): unknown {
     return value === 0 ? REFRESH_DISABLED_SENTINEL : value;
 }
 
+/**
+ * Whether to force a one-shot full-state refresh right after startup.
+ *
+ * getDevices() only seeds HomeKit from the cloud's stored snapshot, which can be
+ * stale for changes made outside HomeKit (e.g. a setpoint set on a heat-pump's
+ * physical remote). A startup refresh makes a restart reflect the real state
+ * immediately instead of waiting up to a full refreshPeriod. It is skipped when
+ * the user opted out of the periodic refresh (refreshPeriod: 0 → sentinel), so
+ * disabling the refresh stays a true opt-out. `resolvedRefreshPeriod` is the
+ * value already passed through resolveRefreshPeriod.
+ */
+export function shouldRefreshOnStartup(resolvedRefreshPeriod: unknown): boolean {
+    return resolvedRefreshPeriod !== REFRESH_DISABLED_SENTINEL;
+}
+
 // Process-wide error handlers must be installed only once, even if several
 // platform instances are configured (e.g. multiple TaHoma accounts), otherwise
 // each instance adds its own listener and Node warns about a leak.
@@ -96,13 +111,20 @@ export class Platform implements DynamicPlatformPlugin {
 
         // The periodic full-state refresh (refreshPeriod) POSTs to Somfy's
         // /setup/devices/states/refresh, a heavily rate-limited endpoint — too
-        // frequent and the cloud answers "429 QUOTA_EXCEEDED". It is only needed
-        // to catch changes made outside HomeKit on one-way RTS devices; io/cloud
-        // devices already stream their state through event polling. Let users with
-        // no RTS devices opt out entirely with refreshPeriod: 0 (see
-        // resolveRefreshPeriod for why a plain 0 cannot reach overkiz unchanged).
+        // frequent and the cloud answers "429 QUOTA_EXCEEDED". It forces the box
+        // to re-declare every state, which is the ONLY way to catch changes the
+        // box does not stream through event polling: one-way RTS devices, but
+        // also some io/cloud changes — notably a setpoint set on an Atlantic
+        // heat-pump's physical room remote, which never emits a
+        // DeviceStateChangedEvent. With refreshPeriod: 0 such a change never
+        // reaches HomeKit (even a restart only re-reads the same stale cloud
+        // snapshot, since getDevices() does not force a refresh), so disabling it
+        // is only safe with no RTS devices and no such local controls. See
+        // resolveRefreshPeriod for why a plain 0 cannot reach overkiz unchanged.
         if (config['refreshPeriod'] === 0) {
-            this.log.info('Refresh period set to 0: periodic full-state refresh disabled (state still updates via polling).');
+            this.log.warn('Refresh period set to 0: periodic full-state refresh disabled. '
+                + 'Changes made outside HomeKit (RTS devices, or a setpoint set on a physical remote) '
+                + 'may not appear in HomeKit until you re-enable it.');
         }
         config['refreshPeriod'] = resolveRefreshPeriod(config['refreshPeriod']);
 
@@ -225,6 +247,21 @@ export class Platform implements DynamicPlatformPlugin {
             const deleted = this.accessories.filter((accessory) => !uuids.includes(accessory.UUID));
             this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, deleted);
             this.retryDelay = DEFAULT_RETRY_DELAY;
+
+            // Devices are now registered and their states seeded from the cloud
+            // snapshot returned by getDevices(). That snapshot can be stale for
+            // changes made outside HomeKit (e.g. a setpoint set on an Atlantic
+            // heat-pump's physical room remote, which the box never streams
+            // through event polling). The scheduled refresh task is armed but
+            // does not fire until a full refreshPeriod elapses (default 30 min),
+            // so without this a restart would not pick such changes up. Force one
+            // full-state refresh now so a restart reflects the real state right
+            // away. Best-effort: a failure here must not abort startup, and it is
+            // skipped when the periodic refresh is disabled to honour the opt-out.
+            if (shouldRefreshOnStartup(this.config['refreshPeriod'])) {
+                this.client.refreshAllStates().catch((error: any) =>
+                    this.log.debug('Initial state refresh failed:', error?.message ?? error));
+            }
         } catch (error: any) {
             this.log.error(error);
             this.log.error('Retry in ' + this.retryDelay + ' sec...');

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 // NB: no vi.mock('../src/Platform') here — unlike the mapper tests, we exercise
 // the real module to test its refreshPeriod translation.
-import { resolveRefreshPeriod } from '../src/Platform';
+import { resolveRefreshPeriod, shouldRefreshOnStartup } from '../src/Platform';
 
 // Mirror of how overkiz-client turns the resolved refreshPeriod into a timer:
 //   Client:               refreshPeriod = (config.refreshPeriod || 30) * 60   // seconds
@@ -42,5 +42,19 @@ describe('resolveRefreshPeriod', () => {
                 expect(delay).toBeLessThanOrEqual(NODE_MAX_TIMER_MS);
             }
         }
+    });
+});
+
+describe('shouldRefreshOnStartup', () => {
+    it('forces a startup refresh when the periodic refresh is enabled', () => {
+        // Values as they reach the platform after resolveRefreshPeriod.
+        expect(shouldRefreshOnStartup(resolveRefreshPeriod(30))).toBe(true);
+        expect(shouldRefreshOnStartup(resolveRefreshPeriod(120))).toBe(true);
+        // Unset → overkiz default applies, refresh still wanted at startup.
+        expect(shouldRefreshOnStartup(resolveRefreshPeriod(undefined))).toBe(true);
+    });
+
+    it('skips the startup refresh when the user disabled the periodic refresh (0 → sentinel)', () => {
+        expect(shouldRefreshOnStartup(resolveRefreshPeriod(0))).toBe(false);
     });
 });
