@@ -307,7 +307,7 @@ describe('WaterHeatingSystem', () => {
         const platform = new FakePlatform();
         const device = new FakeDevice({ uiClass: 'WaterHeatingSystem', widgetName: 'WaterHeatingSystem' });
         const mapper = new WaterHeatingSystem(platform as any, {} as any, device as any) as any;
-        expect(mapper.MIN_TEMP).toBe(45);
+        expect(mapper.MIN_TEMP).toBe(40);
         expect(mapper.MAX_TEMP).toBe(65);
     });
 });

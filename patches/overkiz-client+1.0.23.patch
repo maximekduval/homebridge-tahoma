@@ -1,0 +1,22 @@
+diff --git a/node_modules/overkiz-client/dist/ApiClient.js b/node_modules/overkiz-client/dist/ApiClient.js
+index 5e41c0b..8b752a7 100644
+--- a/node_modules/overkiz-client/dist/ApiClient.js
++++ b/node_modules/overkiz-client/dist/ApiClient.js
+@@ -46,6 +46,17 @@ class ApiClient extends events_1.EventEmitter {
+                         }
+                     }
+                 }
++                else if (error.response.status === 429 && json && json.errorCode === 'QUOTA_EXCEEDED' && reconnect) {
++                    // Observed empirically: this quota is tied to the login session,
++                    // not to a calendar window. A fresh login clears it (same effect
++                    // as restarting the plugin), so force a re-login and retry once
++                    // instead of failing every call until the next scheduled attempt.
++                    this.connectPromise = undefined;
++                    this.isAuthenticated = false;
++                    Client_1.logger.debug('Quota exceeded, forcing re-login:', msg);
++                    this.emit('disconnect');
++                    return this.request(options, false);
++                }
+                 //logger.debug(msg);
+                 throw msg;
+             }

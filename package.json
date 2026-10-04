@@ -14,7 +14,7 @@
   },
   "engines": {
     "node": ">=20.12.0",
-    "homebridge": ">=1.6.0"
+    "homebridge": "^1.6.0 || ^2.0.0"
   },
   "main": "dist/index.js",
   "files": [
@@ -43,8 +43,8 @@
   ],
   "homepage": "https://github.com/maximekduval/homebridge-tahoma#readme",
   "dependencies": {
-    "moment": "^2.30.1",
-    "overkiz-client": "^1.0.20",
+    "moment": "^2.31.0",
+    "overkiz-client": "^1.0.23",
     "patch-package": "^8.0.1"
   },
   "devDependencies": {
