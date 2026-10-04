@@ -4,20 +4,36 @@ How a new version of `homebridge-tahoma-mk` reaches npm and the Homebridge UI.
 
 ## Steps
 
-1. Add a `## X.Y.Z` section at the top of `CHANGELOG.md` for the next version,
-   which is the current `version` of `package.json` plus one patch:
-   `npm publish` bumps it itself (see below).
-2. Run `npm publish` on `master`. `prepublishOnly` runs the lint and the tests,
-   builds, then bumps the patch version with a `Release X.Y.Z` commit and a
-   `vX.Y.Z` tag, and that bumped version is published.
-3. Push the commit and the tag: `git push --follow-tags`.
-4. On GitHub, go to Releases > Draft a new release, choose the tag `vX.Y.Z`,
-   leave the description empty and publish. The **Release notes** workflow then
-   copies the `## X.Y.Z` section of `CHANGELOG.md` into the description of the
-   release.
+1. In a pull request, bump the version without creating a tag:
 
-`npm test` fails when the version in `package.json` has no changelog section,
-which catches a missing section on the next run of the tests after the bump.
+   ```sh
+   npm version patch --no-git-tag-version
+   ```
+
+   This updates `version` in `package.json` and `package-lock.json`. Add a
+   `## X.Y.Z` section at the top of `CHANGELOG.md` in the same pull request.
+   `npm test` fails when the version has no changelog section, so a release
+   cannot go out without notes. Merge it once CI is green.
+2. On GitHub, go to Releases > Draft a new release, create the tag `vX.Y.Z` on
+   `master`, leave the description empty and publish.
+3. Two workflows start by themselves:
+   - **Release** stages the package on npm. It first checks that the tag
+     matches `version` in `package.json` and is on `master`.
+   - **Release notes** copies the `## X.Y.Z` section of `CHANGELOG.md` into the
+     description of the GitHub release.
+4. Approve the staged version with 2FA on npmjs.com (package > Versions), or run
+   `npm stage approve homebridge-tahoma-mk@X.Y.Z`. npm first validates the
+   package for a couple of minutes; the approval is available after that.
+
+Do not run `npm publish` or `npm version` with a tag on your machine: the
+version and the tag come from the pull request and the GitHub release.
+
+The **Release** workflow authenticates with npm trusted publishing, configured
+on npmjs.com for this repository and `release.yml` with the stage-only
+permission, so no npm token is stored in GitHub. That configuration is tied to
+the repository name and the workflow file name: if either is renamed, update the
+trusted publisher in the package settings on npmjs.com before the next release,
+or the **Release** workflow is refused.
 
 ## Release notes in the Homebridge UI
 
@@ -33,7 +49,7 @@ It reads both from the GitHub repository found in `homepage`, or else `bugs`, of
 
 To fill a release that already exists, or to create one for an existing tag, run
 the **Release notes** workflow from the Actions tab and give it the tag, for
-example `v1.0.18`. A description written by hand is never overwritten. Check
+example `v1.0.20`. A description written by hand is never overwritten. Check
 `latest` only for the newest version: GitHub marks a new release as the latest
 one, and an older version must not take that label. To preview the notes of a
-version, run `node scripts/changelog-section.mjs 1.0.18`.
+version, run `node scripts/changelog-section.mjs 1.0.20`.
