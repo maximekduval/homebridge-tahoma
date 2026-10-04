@@ -45,28 +45,28 @@ export default class AirSensor extends Mapper {
                 break;
             case 'core:AirQualityState':
                 switch (value) {
-                    case "optimalAirRange":
+                    case 'optimalAirRange':
                         this.quality?.updateValue(Characteristics.AirQuality.EXCELLENT);
                         break;
-                    case "slightlyHumidRange":
-                    case "slightlyDryAirRange":
+                    case 'slightlyHumidRange':
+                    case 'slightlyDryAirRange':
                         this.quality?.updateValue(Characteristics.AirQuality.GOOD);
                         break;
-                    case "dryAirRange":
-                    case "slightlyHotAndHumidRange":
+                    case 'dryAirRange':
+                    case 'slightlyHotAndHumidRange':
                         this.quality?.updateValue(Characteristics.AirQuality.FAIR);
                         break;
-                    case "excessivelyDryAirRange":
-                    case "highHumidityRange":
-                    case "highTemperatureAndHumidityRange":
+                    case 'excessivelyDryAirRange':
+                    case 'highHumidityRange':
+                    case 'highTemperatureAndHumidityRange':
                         this.quality?.updateValue(Characteristics.AirQuality.INFERIOR);
                         break;
-                    case "mouldsAndDustMitesRisk":
-                    case "mouldsRisk":
-                    case "temperatureOrHumidityOutOfAnalysisRange":
+                    case 'mouldsAndDustMitesRisk':
+                    case 'mouldsRisk':
+                    case 'temperatureOrHumidityOutOfAnalysisRange':
                         this.quality?.updateValue(Characteristics.AirQuality.POOR);
                         break;
-                    case "error":
+                    case 'error':
                         this.quality?.updateValue(Characteristics.AirQuality.UNKNOWN);
                         break;
                 }
