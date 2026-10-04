@@ -80,14 +80,15 @@ Local API service is available on TaHoma and TaHoma switch gateways.
 
 **WARNING: Switching to local API will break your HomeKit configuration (automations) as local API device identifiers actually differs.**
 
-To use Local API you will have to:
-1. Activate `developer mode` ([www.somfy.com](https://www.somfy.com) > My Account > Activate developer mode) 
-2. Generate API credentials at [https://dev.duboc.pro/homebridge-tahoma](https://dev.duboc.pro/homebridge-tahoma)
-3. Configure the plugin service to Local API: `"service":"local"`
+To use Local API, activate the developer mode and generate a token in the TaHoma By Somfy app, as described in [Somfy-Developer/Somfy-TaHoma-Developer-Mode](https://github.com/Somfy-Developer/Somfy-TaHoma-Developer-Mode):
 
-When using Local API service, please fill `user` with your gateway PIN number or IPv4 address and `password` with the token generated at [step 2](https://dev.duboc.pro/homebridge-tahoma)
+1. Open the TaHoma By Somfy app.
+2. Go to Configure the installation > Access the parameters of your TaHoma box.
+3. Tap the PIN of your gateway (like `2001-1234-5678`) 7 times quickly to activate the developer mode.
+4. Accept the terms shown by the app, then generate a token on the next screen.
+5. Configure the plugin service to Local API: `"service":"local"`, with the PIN of your gateway (or its IPv4 address) as `user` and the generated token as `password`.
 
-For more information, browse [https://developer.somfy.com/developer-mode](https://developer.somfy.com/developer-mode)
+The former procedure (Activate developer mode in My Account on somfy.com, then credentials generated at dev.duboc.pro) is no longer available since August 2026.
 
 # Specific device configuration
 
