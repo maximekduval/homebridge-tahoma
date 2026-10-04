@@ -4,6 +4,25 @@ Changes of `homebridge-tahoma-mk`, the fork of
 [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma). The
 history of the versions before the fork is in the upstream repository.
 
+## 1.0.20
+
+First version on npm since 1.0.18. It brings the changes of 1.0.19, taken from
+upstream [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma)
+2.2.62 to 2.2.64:
+
+- Air quality sensors show their air quality from `core:AirQualityState`, and
+  report whether they are active, in fault or low on battery. The
+  `enocean:EnOceanHumidityComfortSensor` is no longer exposed.
+- Water heaters accept a minimum target temperature of 40 °C instead of 45 °C.
+- Remove the duplicate "Flexom (Bouygues)" entry from the service list of the
+  settings.
+- Update `overkiz-client` to 1.0.23: the local API finds the gateway on the
+  network again, and its dependencies `axios` and `uuid` get their security
+  fixes. Update `moment` to 2.31.0 for its security fix.
+- Describe the current way to activate the developer mode for the local API,
+  from the TaHoma By Somfy app.
+- Declare Homebridge 2 support.
+
 ## 1.0.19
 
 Changes taken from upstream
@@ -22,6 +41,8 @@ to 2.2.64:
 - Describe the current way to activate the developer mode for the local API,
   from the TaHoma By Somfy app.
 - Declare Homebridge 2 support.
+
+Not published on npm.
 
 ## 1.0.18
 
