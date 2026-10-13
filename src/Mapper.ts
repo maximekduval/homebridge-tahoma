@@ -100,6 +100,7 @@ export default abstract class Mapper {
     private translate(value: string) {
         switch (value) {
             case 'boost': return 'Boost';
+            case 'dehumidifier': return 'Déshumidificateur';
             case 'drying': return 'Séchage';
             default: return value.charAt(0).toUpperCase() + value.slice(1);
         }
