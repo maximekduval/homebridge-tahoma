@@ -1,7 +1,16 @@
-import { Perms } from 'homebridge';
-import { Characteristics } from '../../Platform';
-import { Command } from 'overkiz-client';
+import { Characteristic, Perms } from 'homebridge';
+import { Characteristics, Services } from '../../Platform';
+import { Command, ExecutionState } from 'overkiz-client';
 import HeatingSystem from '../HeatingSystem';
+
+// Values reported by io:PassAPCOperatingModeState / accepted by setPassAPCOperatingMode.
+enum PassAPCOperatingMode {
+    Auto = 'auto',
+    Cooling = 'cooling',
+    Drying = 'drying',
+    Heating = 'heating',
+    Stop = 'stop',
+}
 
 export default class AtlanticPassAPCZoneControl extends HeatingSystem {
     protected TARGET_MODES = [
@@ -10,6 +19,21 @@ export default class AtlanticPassAPCZoneControl extends HeatingSystem {
         Characteristics.TargetHeatingCoolingState.COOL,
         Characteristics.TargetHeatingCoolingState.OFF,
     ];
+
+    // HomeKit's Thermostat has no "dry" mode: the dehumidifier mode is exposed
+    // as a dedicated switch next to the thermostat.
+    protected dehumidifier: Characteristic | undefined;
+
+    protected registerServices() {
+        const services = super.registerServices();
+        const dehumidifier = this.registerService(Services.Switch, 'dehumidifier');
+        this.dehumidifier = dehumidifier.getCharacteristic(Characteristics.On);
+        this.dehumidifier.onSet((value) => {
+            this.setDehumidifier(value).catch(e => this.error('setDehumidifier failed:', e));
+        });
+        services.push(dehumidifier);
+        return services;
+    }
 
     protected registerMainService() {
         const service = super.registerMainService();
@@ -21,31 +45,49 @@ export default class AtlanticPassAPCZoneControl extends HeatingSystem {
         switch (value) {
             case Characteristics.TargetHeatingCoolingState.AUTO:
                 return [
-                    new Command('setPassAPCOperatingMode', 'heating'),
+                    new Command('setPassAPCOperatingMode', PassAPCOperatingMode.Heating),
                     new Command('setHeatingCoolingAutoSwitch', 'on'),
                 ];
 
             case Characteristics.TargetHeatingCoolingState.HEAT:
                 return [
-                    new Command('setPassAPCOperatingMode', 'heating'),
+                    new Command('setPassAPCOperatingMode', PassAPCOperatingMode.Heating),
                     new Command('setHeatingCoolingAutoSwitch', 'off'),
                 ];
 
             case Characteristics.TargetHeatingCoolingState.COOL:
                 return [
-                    new Command('setPassAPCOperatingMode', 'cooling'),
+                    new Command('setPassAPCOperatingMode', PassAPCOperatingMode.Cooling),
                     new Command('setHeatingCoolingAutoSwitch', 'off'),
                 ];
 
             default:
             case Characteristics.TargetHeatingCoolingState.OFF:
                 return [
-                    new Command('setPassAPCOperatingMode', 'stop'),
+                    new Command('setPassAPCOperatingMode', PassAPCOperatingMode.Stop),
                 ];
         }
     }
 
-     
+    protected getDehumidifierCommands(value): Array<Command> {
+        if (value) {
+            return [
+                new Command('setPassAPCOperatingMode', PassAPCOperatingMode.Drying),
+                new Command('setHeatingCoolingAutoSwitch', 'off'),
+            ];
+        }
+        return [new Command('setPassAPCOperatingMode', PassAPCOperatingMode.Stop)];
+    }
+
+    protected async setDehumidifier(value) {
+        const action = await this.executeCommands(this.getDehumidifierCommands(value));
+        action.on('update', (state) => {
+            if (state === ExecutionState.FAILED) {
+                this.dehumidifier?.updateValue(!value);
+            }
+        });
+    }
+
     protected getTargetTemperatureCommands(value): Command | Array<Command> {
         return [];
     }
@@ -63,33 +105,45 @@ export default class AtlanticPassAPCZoneControl extends HeatingSystem {
     }
 
     protected computeStates() {
+        const isAuto = this.device.get('core:HeatingCoolingAutoSwitchState') === 'on';
         let targetState;
+        let currentState;
         switch (this.device.get('io:PassAPCOperatingModeState')) {
-            case 'heating':
-                if (this.device.get('core:HeatingCoolingAutoSwitchState') === 'on') {
-                    targetState = Characteristics.TargetHeatingCoolingState.AUTO;
-                } else {
-                    targetState = Characteristics.TargetHeatingCoolingState.HEAT;
-                }
-                this.currentState?.updateValue(Characteristics.CurrentHeatingCoolingState.HEAT);
+            case PassAPCOperatingMode.Heating:
+                targetState = isAuto
+                    ? Characteristics.TargetHeatingCoolingState.AUTO
+                    : Characteristics.TargetHeatingCoolingState.HEAT;
+                currentState = Characteristics.CurrentHeatingCoolingState.HEAT;
                 break;
-            case 'cooling':
-                if (this.device.get('core:HeatingCoolingAutoSwitchState') === 'on') {
-                    targetState = Characteristics.TargetHeatingCoolingState.AUTO;
-                } else {
-                    targetState = Characteristics.TargetHeatingCoolingState.COOL;
-                }
-                this.currentState?.updateValue(Characteristics.CurrentHeatingCoolingState.COOL);
+            case PassAPCOperatingMode.Cooling:
+                targetState = isAuto
+                    ? Characteristics.TargetHeatingCoolingState.AUTO
+                    : Characteristics.TargetHeatingCoolingState.COOL;
+                currentState = Characteristics.CurrentHeatingCoolingState.COOL;
                 break;
-            case 'stop':
+            case PassAPCOperatingMode.Auto:
+                targetState = Characteristics.TargetHeatingCoolingState.AUTO;
+                break;
+            case PassAPCOperatingMode.Drying:
+                // Neither heating nor cooling: the thermostat shows "Off" and the
+                // dehumidifier switch carries the mode. Previously this state was
+                // ignored, so HomeKit kept showing the last mode (often "Heat").
                 targetState = Characteristics.TargetHeatingCoolingState.OFF;
-                this.currentState?.updateValue(Characteristics.CurrentHeatingCoolingState.OFF);
+                currentState = Characteristics.CurrentHeatingCoolingState.OFF;
+                break;
+            case PassAPCOperatingMode.Stop:
+                targetState = Characteristics.TargetHeatingCoolingState.OFF;
+                currentState = Characteristics.CurrentHeatingCoolingState.OFF;
                 break;
         }
 
-        // eslint-disable-next-line eqeqeq
-        if (this.targetState !== undefined && targetState != null && this.isIdle) {
-            this.targetState.updateValue(targetState);
+        if (currentState !== undefined) {
+            this.currentState?.updateValue(currentState);
+        }
+
+        if (targetState !== undefined && this.isIdle) {
+            this.targetState?.updateValue(targetState);
+            this.dehumidifier?.updateValue(this.device.get('io:PassAPCOperatingModeState') === PassAPCOperatingMode.Drying);
         }
     }
 }

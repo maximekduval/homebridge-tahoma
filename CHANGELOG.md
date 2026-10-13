@@ -4,6 +4,13 @@ Changes of `homebridge-tahoma-mk`, the fork of
 [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma). The
 history of the versions before the fork is in the upstream repository.
 
+## 1.0.21
+
+- Atlantic PassAPC zone control: the dehumidifier mode no longer shows as Heat
+  in HomeKit. The thermostat shows Off and a new "Déshumidificateur" switch is
+  on; the switch also turns the dehumidifier mode on and off. An `auto`
+  operating mode is shown as Auto.
+
 ## 1.0.20
 
 First version on npm since 1.0.18. It brings the changes of 1.0.19, taken from
