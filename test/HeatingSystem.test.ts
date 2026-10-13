@@ -37,6 +37,12 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.getHeatingCooling (C3)', () => {
         expect(zone.getHeatingCooling()).toBe('Cooling');
     });
 
+    it('follows the cooling side when the parent is dehumidifying', () => {
+        const { zone, platform } = makeZone({ parentStates: { 'io:PassAPCOperatingModeState': 'drying' } });
+        expect(zone.getHeatingCooling()).toBe('Cooling');
+        expect(platform.log.warn).not.toHaveBeenCalled();
+    });
+
     it('uses the parent operating mode when available (heating)', () => {
         const { zone } = makeZone({ parentStates: { 'io:PassAPCOperatingModeState': 'heating' } });
         expect(zone.getHeatingCooling()).toBe('Heating');

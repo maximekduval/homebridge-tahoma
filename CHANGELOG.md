@@ -4,6 +4,12 @@ Changes of `homebridge-tahoma-mk`, the fork of
 [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma). The
 history of the versions before the fork is in the upstream repository.
 
+## 1.0.22
+
+- Atlantic PassAPC zones follow their cooling states while the zone control is
+  in dehumidifier mode, instead of logging "getHeatingCooling: operating mode is
+  unknown" and defaulting to heating.
+
 ## 1.0.21
 
 - Atlantic PassAPC zone control: the dehumidifier mode no longer shows as Heat

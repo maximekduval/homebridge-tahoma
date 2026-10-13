@@ -198,7 +198,9 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     private getOperatingMode(): 'Heating' | 'Cooling' | undefined {
         // Preferred source: the parent zone-control operating mode.
         const operatingMode = this.device.parent?.get('io:PassAPCOperatingModeState');
-        if (operatingMode === 'cooling') {
+        // The dehumidifier mode runs the heat pump on its cooling cycle, so the
+        // zones follow their cooling states and set points.
+        if (operatingMode === 'cooling' || operatingMode === 'drying') {
             return 'Cooling';
         }
         if (operatingMode === 'heating') {
