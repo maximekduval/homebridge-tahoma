@@ -6,6 +6,7 @@ export default class AtlanticPassAPCHeatingZone extends HeatingSystem {
     protected THERMOSTAT_CHARACTERISTICS = ['eco', 'prog'];
     protected MIN_TEMP = 10;
     protected MAX_TEMP = 35;
+    protected IGNORE_TEMPERATURE_WHEN_OFF = true;
     protected TARGET_MODES = [
         Characteristics.TargetHeatingCoolingState.AUTO,
         Characteristics.TargetHeatingCoolingState.OFF,

@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { describe, it, expect, vi } from 'vitest';
 
 // The mappers reach for the module-level Characteristics/Services that the real
@@ -236,6 +237,46 @@ describe('AtlanticPassAPCHeatingAndCoolingZone.computeStates', () => {
         platform.client.hasExecution.mockReturnValue(true);
         zone.computeStates();
         expect(zone.targetTemperature.value).toBe(23); // not clobbered by stale echo
+    });
+});
+
+describe('setTargetTemperature while the zone is off', () => {
+    function withCharacteristics(mapper: any, targetState: number) {
+        mapper.targetState = new FakeCharacteristic('TargetHeatingCoolingState', targetState);
+        mapper.targetTemperature = new FakeCharacteristic('TargetTemperature', 23);
+        mapper.lastConfirmedTemperature = 19;
+    }
+
+    it('drops the setpoint a HomeKit scene writes along with OFF, and shows the real one again', async () => {
+        const { zone } = makeZone({ states: { 'core:HeatingOnOffState': 'off' } });
+        withCharacteristics(zone, 0); // OFF
+        const execute = vi.spyOn(zone, 'executeCommands').mockResolvedValue(new EventEmitter() as any);
+
+        await zone.setTargetTemperature(23);
+
+        expect(execute).not.toHaveBeenCalled();
+        expect(zone.targetTemperature.value).toBe(19);
+    });
+
+    it('still sends the setpoint when the zone is turned on', async () => {
+        const { zone } = makeZone({ states: { 'core:HeatingOnOffState': 'on' } });
+        withCharacteristics(zone, 1); // HEAT
+        zone.prog = { value: false };
+        const execute = vi.spyOn(zone, 'executeCommands').mockResolvedValue(new EventEmitter() as any);
+
+        await zone.setTargetTemperature(21);
+
+        expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps sending it for mappers that did not opt in', async () => {
+        const { mapper } = makeHeating();
+        withCharacteristics(mapper, 0); // OFF
+        const execute = vi.spyOn(mapper, 'executeCommands').mockResolvedValue(new EventEmitter() as any);
+
+        await mapper.setTargetTemperature(21);
+
+        expect(execute).toHaveBeenCalledTimes(1);
     });
 });
 
