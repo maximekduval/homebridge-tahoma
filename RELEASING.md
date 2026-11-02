@@ -22,8 +22,12 @@ How a new version of `homebridge-tahoma-mk` reaches npm and the Homebridge UI.
    - **Release notes** copies the `## X.Y.Z` section of `CHANGELOG.md` into the
      description of the GitHub release.
 4. Approve the staged version with 2FA on npmjs.com (package > Versions), or run
-   `npm stage approve homebridge-tahoma-mk@X.Y.Z`. npm first validates the
-   package for a couple of minutes; the approval is available after that.
+   `npm stage approve <stage-id>`. The stage id is a UUID, not the package name
+   and version: the **Release** workflow prints it at the end of its "Stage the
+   package on npm" step (`staged with id ...`), and
+   `npm stage list homebridge-tahoma-mk` shows it after `npm login`. npm first
+   validates the package for a couple of minutes; the approval is available
+   after that.
 
 Do not run `npm publish` or `npm version` with a tag on your machine: the
 version and the tag come from the pull request and the GitHub release.
