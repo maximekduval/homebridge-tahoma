@@ -6,6 +6,7 @@ export default class AtlanticPassAPCHeatingAndCoolingZone extends HeatingSystem 
     protected THERMOSTAT_CHARACTERISTICS = ['prog'];
     protected MIN_TEMP = 16;
     protected MAX_TEMP = 30;
+    protected IGNORE_TEMPERATURE_WHEN_OFF = true;
     // Complete set published at startup and whenever the zone is off.
     // updateValidModes() narrows it to OFF + the active season (HEAT or COOL) only
     // while the zone is ON and the season is known reliably, so a running zone tile

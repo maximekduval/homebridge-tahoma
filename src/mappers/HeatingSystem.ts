@@ -163,7 +163,20 @@ export default class HeatingSystem extends Mapper {
         return new Command('setTargetTemperature', value);
     }
 
+    // For zones where OFF means "switched off": drop a setpoint written while the
+    // target mode is OFF. HomeKit scenes and automations store a temperature even
+    // for "Off" (the one the tile showed when the action was created) and write it
+    // right after the OFF, which would overwrite the zone's real setpoint.
+    protected IGNORE_TEMPERATURE_WHEN_OFF = false;
+
     protected async setTargetTemperature(value, attempt = 0) {
+        if (this.IGNORE_TEMPERATURE_WHEN_OFF && this.targetState?.value === Characteristics.TargetHeatingCoolingState.OFF) {
+            this.info('setTargetTemperature ignored, the zone is off:', value);
+            if (this.lastConfirmedTemperature !== undefined) {
+                this.targetTemperature?.updateValue(this.lastConfirmedTemperature);
+            }
+            return;
+        }
         const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
         action.on('update', (state, event) => {
             if (state === ExecutionState.FAILED) {

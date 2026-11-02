@@ -4,6 +4,14 @@ Changes of `homebridge-tahoma-mk`, the fork of
 [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma). The
 history of the versions before the fork is in the upstream repository.
 
+## 1.0.23
+
+- Atlantic PassAPC zones no longer send a temperature to the box while the mode
+  is Off. A HomeKit scene or automation that turns a zone off also stores a
+  temperature, the one the tile showed when it was created, and writes it right
+  after the Off: it overwrote the setpoint of the zone (for example 19 became
+  23) each time. The thermostat shows the real setpoint again.
+
 ## 1.0.22
 
 - Atlantic PassAPC zones follow their cooling states while the zone control is
