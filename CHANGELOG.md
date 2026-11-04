@@ -4,6 +4,14 @@ Changes of `homebridge-tahoma-mk`, the fork of
 [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma). The
 history of the versions before the fork is in the upstream repository.
 
+## 1.0.24
+
+- Lock `follow-redirects` 1.16.2, which fixes an advisory where custom
+  credential headers could follow a cross-origin redirect (GHSA-mrwp-f3q8-3g9p).
+  Update `vitest` and `@vitest/coverage-v8` to 4.1.12, and refresh the other
+  development dependencies within their ranges (development only). `npm audit`
+  no longer reports any high issue. No change in behavior.
+
 ## 1.0.23
 
 - Atlantic PassAPC zones no longer send a temperature to the box while the mode
