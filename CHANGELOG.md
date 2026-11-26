@@ -4,6 +4,29 @@ Changes of `homebridge-tahoma-mk`, the fork of
 [dubocr/homebridge-tahoma](https://github.com/dubocr/homebridge-tahoma). The
 history of the versions before the fork is in the upstream repository.
 
+## 1.0.25
+
+- Heating commands that fail with `PEER_DOWN` (the box could not reach the
+  device) or `TIME_OUT_ON_TRANSMITTED_COMMAND` (sent but never acknowledged,
+  often while the Somfy cloud connection is unstable) are retried
+  automatically, like `DATA_TRANSPORT_SERVICE_ERROR` and `DEVICE_DEFECT`:
+  after 1, 2, 4, 8 and 16 seconds, at most 5 times. Before, the command was
+  dropped and HomeKit went back to the old state.
+- A retry no longer sends an old value after a newer command. When a mode or
+  setpoint command failed and was waiting to be retried, choosing another value
+  in the meantime still sent the old one at the end of the wait, which
+  overwrote the new choice (for example an Off that came back after an On). A
+  retry now stops as soon as a newer command of the same kind (mode, or
+  setpoint) exists, and the failure of a replaced command no longer puts
+  HomeKit back to the old value.
+- After a command times out (`TIMED_OUT`: no confirmation within 2 minutes,
+  usually because the connection to the Somfy cloud was lost), the plugin reads
+  the real states back from the cloud and shows them in HomeKit. Before,
+  HomeKit kept the requested value, confirmed or not, until the next periodic
+  refresh (30 minutes by default). The read is skipped while another command
+  of the same device is running, and one read serves all the devices that time
+  out together. This applies to every kind of device, not only heating.
+
 ## 1.0.24
 
 - Lock `follow-redirects` 1.16.2, which fixes an advisory where custom

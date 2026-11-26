@@ -271,6 +271,22 @@ export class Platform implements DynamicPlatformPlugin {
         }
     }
 
+    private resyncPromise: Promise<void> | null = null;
+
+    /**
+     * Read the states of all devices back from the cloud into the devices. Calls
+     * made while one read is running share it: when the cloud has a hiccup,
+     * several zones time out together and one request is enough for all.
+     */
+    public resyncDeviceStates(): Promise<void> {
+        if (this.resyncPromise === null) {
+            this.resyncPromise = this.client.refreshDevices().finally(() => {
+                this.resyncPromise = null;
+            });
+        }
+        return this.resyncPromise;
+    }
+
     /*
         action: The action to execute
     */

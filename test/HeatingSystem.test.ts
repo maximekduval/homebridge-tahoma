@@ -311,10 +311,173 @@ describe('HeatingSystem.isRetryable', () => {
         expect(mapper.isRetryable('DEVICE_DEFECT')).toBe(true);
     });
 
+    it('retries PEER_DOWN (box cannot reach the device for a moment)', () => {
+        const { mapper } = makeHeating();
+        expect(mapper.isRetryable('PEER_DOWN')).toBe(true);
+    });
+
+    it('retries TIME_OUT_ON_TRANSMITTED_COMMAND (sent but never acknowledged)', () => {
+        const { mapper } = makeHeating();
+        expect(mapper.isRetryable('TIME_OUT_ON_TRANSMITTED_COMMAND')).toBe(true);
+    });
+
+    it('re-sends an on/off command that failed with PEER_DOWN, then stops on success', async () => {
+        vi.useFakeTimers();
+        try {
+            const { mapper } = makeHeating();
+            const first = new EventEmitter();
+            const second = new EventEmitter();
+            const execute = vi.spyOn(mapper, 'executeCommands')
+                .mockResolvedValueOnce(first as any)
+                .mockResolvedValueOnce(second as any);
+
+            await mapper.setTargetState(0); // OFF
+            first.emit('update', 'FAILED', { failureType: 'PEER_DOWN' });
+            expect(execute).toHaveBeenCalledTimes(1);
+
+            await vi.advanceTimersByTimeAsync(1_000);
+            expect(execute).toHaveBeenCalledTimes(2);
+
+            second.emit('update', 'COMPLETED', {});
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(execute).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('does not retry unknown / permanent failures or a missing failure type', () => {
         const { mapper } = makeHeating();
         expect(mapper.isRetryable('CANCELLED')).toBe(false);
         expect(mapper.isRetryable(undefined)).toBe(false);
+    });
+});
+
+describe('HeatingSystem — a newer command replaces a pending retry', () => {
+    /** Every executeCommands call gets its own action, so a test can fail them one by one. */
+    function mockExecutions(mapper: any) {
+        const actions: EventEmitter[] = [];
+        const execute = vi.spyOn(mapper, 'executeCommands').mockImplementation(async () => {
+            const action = new EventEmitter();
+            actions.push(action);
+            return action as any;
+        });
+        const sent = () => execute.mock.calls.map((call: any[]) => call[0].name);
+        return { actions, execute, sent };
+    }
+
+    it('does not re-send an old mode after the user chose another one', async () => {
+        vi.useFakeTimers();
+        try {
+            const { mapper } = makeHeating();
+            const { actions, sent } = mockExecutions(mapper);
+
+            await mapper.setTargetState(0); // Off
+            actions[0].emit('update', 'FAILED', { failureType: 'PEER_DOWN' }); // retry planned in 1 s
+            await mapper.setTargetState(1); // Heat, before the retry
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(sent()).toEqual(['off', 'heat']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('stops retrying an old mode that was replaced while its retry was running', async () => {
+        vi.useFakeTimers();
+        try {
+            const { mapper } = makeHeating();
+            const { actions, sent } = mockExecutions(mapper);
+
+            await mapper.setTargetState(0); // Off
+            actions[0].emit('update', 'FAILED', { failureType: 'PEER_DOWN' });
+            await vi.advanceTimersByTimeAsync(1_000); // the retry of Off goes out
+            await mapper.setTargetState(1); // Heat, while that retry is running
+            actions[1].emit('update', 'FAILED', { failureType: 'PEER_DOWN' }); // the old Off fails again
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(sent()).toEqual(['off', 'off', 'heat']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('does not put the UI back to the old mode when the replaced command fails for good', async () => {
+        vi.useFakeTimers();
+        try {
+            const { mapper } = makeHeating();
+            mapper.currentState = new FakeCharacteristic('CurrentHeatingCoolingState', 0);
+            mapper.targetState = new FakeCharacteristic('TargetHeatingCoolingState', 1);
+            const { actions } = mockExecutions(mapper);
+
+            await mapper.setTargetState(0); // Off
+            await mapper.setTargetState(1); // Heat replaces it
+            actions[0].emit('update', 'FAILED', { failureType: 'CANCELLED' });
+
+            expect(mapper.targetState.updates).toEqual([]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('still puts the UI back when the latest command fails for good', async () => {
+        const { mapper } = makeHeating();
+        mapper.currentState = new FakeCharacteristic('CurrentHeatingCoolingState', 0);
+        mapper.targetState = new FakeCharacteristic('TargetHeatingCoolingState', 1);
+        const { actions } = mockExecutions(mapper);
+
+        await mapper.setTargetState(1);
+        actions[0].emit('update', 'FAILED', { failureType: 'CANCELLED' });
+
+        expect(mapper.targetState.updates).toEqual([0]);
+    });
+
+    it('keeps the retry of a mode when only the setpoint changes', async () => {
+        vi.useFakeTimers();
+        try {
+            const { mapper } = makeHeating();
+            const { actions, sent } = mockExecutions(mapper);
+
+            await mapper.setTargetState(0); // Off
+            actions[0].emit('update', 'FAILED', { failureType: 'PEER_DOWN' });
+            await mapper.setTargetTemperature(21); // another kind of command
+            await vi.advanceTimersByTimeAsync(1_000);
+
+            expect(sent()).toEqual(['off', 'setTargetTemperature', 'off']);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('does not re-send an old setpoint after a newer one', async () => {
+        vi.useFakeTimers();
+        try {
+            const { mapper } = makeHeating();
+            const { actions, execute } = mockExecutions(mapper);
+
+            await mapper.setTargetTemperature(20);
+            actions[0].emit('update', 'FAILED', { failureType: 'DEVICE_DEFECT' }); // retry planned in 1 s
+            await mapper.setTargetTemperature(21);
+            await vi.advanceTimersByTimeAsync(60_000);
+
+            expect(execute).toHaveBeenCalledTimes(2);
+            expect((execute.mock.calls[1] as any[])[0].parameters).toEqual([21]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('does not put the UI back when a replaced setpoint fails for good', async () => {
+        const { mapper } = makeHeating();
+        mapper.lastConfirmedTemperature = 19;
+        mapper.targetTemperature = new FakeCharacteristic('TargetTemperature', 21);
+        const { actions } = mockExecutions(mapper);
+
+        await mapper.setTargetTemperature(20);
+        await mapper.setTargetTemperature(21);
+        actions[0].emit('update', 'FAILED', { failureType: 'CANCELLED' });
+
+        expect(mapper.targetTemperature.updates).toEqual([]);
     });
 });
 

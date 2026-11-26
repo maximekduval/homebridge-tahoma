@@ -190,6 +190,76 @@ describe('Mapper.isIdle — in-flight tracking (C2)', () => {
     });
 });
 
+describe('Mapper.executeCommands — TIMED_OUT re-reads the states', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    async function sent(mapper: TestMapper) {
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        return p;
+    }
+
+    async function timedOut(mapper: TestMapper) {
+        (await sent(mapper)).emit('update', ExecutionState.TIMED_OUT, null);
+    }
+
+    it('reads the states back from the cloud and applies them to HomeKit', async () => {
+        const device = new FakeDevice({ states: { 'core:TargetTemperatureState': 18 } });
+        const { platform, mapper } = makeMapper(device);
+        platform.client.hasExecution.mockReturnValue(false);
+        const apply = vi.spyOn(mapper as any, 'onStatesChanged');
+
+        await timedOut(mapper);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(platform.resyncDeviceStates).toHaveBeenCalledTimes(1);
+        expect(apply).toHaveBeenCalledWith(device.states, true);
+    });
+
+    it('does not read anything back for a command that completed', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+
+        const p = mapper.exec(new Command('a'));
+        await vi.advanceTimersByTimeAsync(100);
+        const action = await p;
+        action.emit('update', ExecutionState.COMPLETED, { timeToNextState: -1 });
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(platform.resyncDeviceStates).not.toHaveBeenCalled();
+    });
+
+    it('does not overwrite HomeKit while a newer command of the mapper is running', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+        const apply = vi.spyOn(mapper as any, 'onStatesChanged');
+
+        const action = await sent(mapper);
+        action.emit('update', ExecutionState.TIMED_OUT, null);
+        mapper.exec(new Command('b')); // a newer command, sent before the read comes back
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(platform.resyncDeviceStates).toHaveBeenCalledTimes(1);
+        expect(apply).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(100); // let the pending batch go
+    });
+
+    it('keeps going when the cloud cannot be read', async () => {
+        const { platform, mapper } = makeMapper();
+        platform.client.hasExecution.mockReturnValue(false);
+        platform.resyncDeviceStates.mockRejectedValueOnce(new Error('Error 504'));
+        const apply = vi.spyOn(mapper as any, 'onStatesChanged');
+
+        await timedOut(mapper);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(apply).not.toHaveBeenCalled();
+        expect(mapper.isIdle).toBe(true);
+        expect(platform.log.debug).toHaveBeenCalledWith(expect.any(String), 'State resync after timeout failed:', 'Error 504');
+    });
+});
+
 describe('Mapper.executeCommands — NOT_TRANSMITTED is transient', () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
