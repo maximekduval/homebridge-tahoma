@@ -137,6 +137,9 @@ export class FakePlatform {
     /** Resolves with a fake execution id; tests can override. */
     executeAction = vi.fn().mockResolvedValue('exec-1');
 
+    /** Re-reads the device states from the cloud. */
+    resyncDeviceStates = vi.fn().mockResolvedValue(undefined);
+
     translate(label: string) {
         return label;
     }

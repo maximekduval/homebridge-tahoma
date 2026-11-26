@@ -202,6 +202,7 @@ export default abstract class Mapper {
                     this.info(commandName, state);
                 } else if (state === ExecutionState.TIMED_OUT) {
                     this.warn(commandName, state);
+                    this.resyncStates();
                 } else {
                     // INITIALIZED / NOT_TRANSMITTED / TRANSMITTED / IN_PROGRESS — transient.
                     this.debug(commandName, state);
@@ -229,6 +230,30 @@ export default abstract class Mapper {
             });
         }
         return this.actionPromise;
+    }
+
+    /**
+     * A TIMED_OUT command never got its confirmation (the event listener was most
+     * likely down), so HomeKit may show a value nobody confirmed: the one the user
+     * asked for, applied or not. Read the real states back from the cloud and push
+     * them to HomeKit instead of waiting for the next periodic refresh.
+     *
+     * The cloud answers with its stored states, and the device only reports the
+     * ones that changed from what it already held, so the states are applied to
+     * HomeKit explicitly (as at startup) rather than waiting for a change event.
+     * Skipped while another command of this mapper is running: its own result
+     * will settle the state, and a stale value must not overwrite it.
+     */
+    private resyncStates() {
+        this.platform.resyncDeviceStates()
+            .then(() => {
+                if (this.stateless || !this.isIdle) {
+                    return;
+                }
+                this.onStatesChanged(this.device.states, true);
+                this.device.sensors.forEach((sensor) => this.onStatesChanged(sensor.states, true));
+            })
+            .catch((error) => this.debug('State resync after timeout failed:', error?.message ?? error));
     }
 
     private isTerminalState(state): boolean {

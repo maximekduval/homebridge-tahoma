@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // NB: no vi.mock('../src/Platform') here — unlike the mapper tests, we exercise
 // the real module to test its refreshPeriod translation.
-import { resolveRefreshPeriod, shouldRefreshOnStartup } from '../src/Platform';
+import { Platform, resolveRefreshPeriod, shouldRefreshOnStartup } from '../src/Platform';
 
 // Mirror of how overkiz-client turns the resolved refreshPeriod into a timer:
 //   Client:               refreshPeriod = (config.refreshPeriod || 30) * 60   // seconds
@@ -56,5 +56,40 @@ describe('shouldRefreshOnStartup', () => {
 
     it('skips the startup refresh when the user disabled the periodic refresh (0 → sentinel)', () => {
         expect(shouldRefreshOnStartup(resolveRefreshPeriod(0))).toBe(false);
+    });
+});
+
+describe('Platform.resyncDeviceStates', () => {
+    // Called on the prototype with a stand-in: building a whole Platform needs homebridge.
+    function resync(self: { client: { refreshDevices: () => Promise<void> }; resyncPromise: Promise<void> | null }) {
+        return (Platform.prototype as any).resyncDeviceStates.call(self) as Promise<void>;
+    }
+
+    it('shares one read between calls made while it runs', async () => {
+        let finish!: () => void;
+        const refreshDevices = vi.fn(() => new Promise<void>((resolve) => {
+            finish = resolve;
+        }));
+        const self = { client: { refreshDevices }, resyncPromise: null };
+
+        const first = resync(self);
+        const second = resync(self);
+        expect(second).toBe(first);
+        expect(refreshDevices).toHaveBeenCalledTimes(1);
+
+        finish();
+        await first;
+    });
+
+    it('reads again once the previous read is done, also after a failure', async () => {
+        const refreshDevices = vi.fn()
+            .mockRejectedValueOnce(new Error('Error 504'))
+            .mockResolvedValueOnce(undefined);
+        const self = { client: { refreshDevices }, resyncPromise: null };
+
+        await expect(resync(self)).rejects.toThrow('Error 504');
+        await resync(self);
+
+        expect(refreshDevices).toHaveBeenCalledTimes(2);
     });
 });

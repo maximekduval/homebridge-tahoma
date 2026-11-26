@@ -126,29 +126,53 @@ export default class HeatingSystem extends Mapper {
     // a cold/off zone on. The backoff (1→2→4→8→16s) gives the unit time to
     // finish starting; if it is genuinely defective we still give up after
     // MAX_COMMAND_RETRIES and revert the UI cleanly.
+    //
+    // PEER_DOWN (the box could not reach the device) and
+    // TIME_OUT_ON_TRANSMITTED_COMMAND (the command was sent but never
+    // acknowledged, typically while the Somfy cloud connection is flapping) are
+    // included for the same reason. Every command sent from here (mode, on/off,
+    // setpoint) just sets a value, so sending it twice is harmless.
     protected isRetryable(failureType?: string): boolean {
         return failureType === 'DATA_TRANSPORT_SERVICE_ERROR' ||
                failureType === 'DATA_TRANSPORT_SERVICE_ABORTED_BY_RECIPIENT' ||
-               failureType === 'DEVICE_DEFECT';
+               failureType === 'DEVICE_DEFECT' ||
+               failureType === 'PEER_DOWN' ||
+               failureType === 'TIME_OUT_ON_TRANSMITTED_COMMAND';
     }
 
+    // Each new command of a kind (mode / setpoint) takes the next number, and a
+    // retry keeps the number of the command it repeats. A retry, or the failure of
+    // a command, whose number is no longer the latest has been replaced by a newer
+    // command: it must neither send its old value again after the newer one, nor
+    // revert the UI over it.
+    private targetStateCommandId = 0;
+    private targetTemperatureCommandId = 0;
+
     protected async setTargetState(value, attempt = 0) {
+        const commandId = attempt === 0 ? ++this.targetStateCommandId : this.targetStateCommandId;
         // Note: we intentionally do not short-circuit when value equals the
         // current target state — that prevented re-issuing a command to re-sync
         // a device whose real state had drifted from HomeKit's.
         const action = await this.executeCommands(this.getTargetStateCommands(value));
         action.on('update', (state, event) => {
+            const superseded = commandId !== this.targetStateCommandId;
             switch (state) {
                 case ExecutionState.COMPLETED:
-                    if (this.stateless) {
+                    if (this.stateless && !superseded) {
                         this.currentState?.updateValue(value);
                     }
                     break;
                 case ExecutionState.FAILED:
-                    if (attempt < this.MAX_COMMAND_RETRIES && this.isRetryable(event?.failureType)) {
+                    if (superseded) {
+                        this.debug('setTargetState replaced by a newer command, not retrying');
+                    } else if (attempt < this.MAX_COMMAND_RETRIES && this.isRetryable(event?.failureType)) {
                         const delay = Math.min(2 ** attempt * 1_000, 30_000);
                         this.warn(`setTargetState failed (${event.failureType}), retry ${attempt + 1}/${this.MAX_COMMAND_RETRIES} in ${delay / 1000}s`);
                         setTimeout(() => {
+                            if (commandId !== this.targetStateCommandId) {
+                                this.debug('setTargetState retry dropped, replaced by a newer command');
+                                return;
+                            }
                             this.setTargetState(value, attempt + 1).catch(e => this.error('setTargetState retry failed:', e));
                         }, delay);
                     } else if (this.currentState) {
@@ -177,13 +201,20 @@ export default class HeatingSystem extends Mapper {
             }
             return;
         }
+        const commandId = attempt === 0 ? ++this.targetTemperatureCommandId : this.targetTemperatureCommandId;
         const action = await this.executeCommands(this.getTargetTemperatureCommands(value));
         action.on('update', (state, event) => {
             if (state === ExecutionState.FAILED) {
-                if (attempt < this.MAX_COMMAND_RETRIES && this.isRetryable(event?.failureType)) {
+                if (commandId !== this.targetTemperatureCommandId) {
+                    this.debug('setTargetTemperature replaced by a newer command, not retrying');
+                } else if (attempt < this.MAX_COMMAND_RETRIES && this.isRetryable(event?.failureType)) {
                     const delay = Math.min(2 ** attempt * 1_000, 30_000);
                     this.warn(`setTargetTemperature failed (${event.failureType}), retry ${attempt + 1}/${this.MAX_COMMAND_RETRIES} in ${delay / 1000}s`);
                     setTimeout(() => {
+                        if (commandId !== this.targetTemperatureCommandId) {
+                            this.debug('setTargetTemperature retry dropped, replaced by a newer command');
+                            return;
+                        }
                         this.setTargetTemperature(value, attempt + 1).catch(e => this.error('setTargetTemperature retry failed:', e));
                     }, delay);
                 } else if (this.lastConfirmedTemperature !== undefined) {
